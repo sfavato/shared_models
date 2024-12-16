@@ -171,7 +171,32 @@ class Binance:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
 
-    
+    def obtenir_tous_les_prix(symbols, chunk_size=100):
+        """
+        Récupère les prix pour une liste de symboles en effectuant des requêtes en morceaux.
+        :param symbols: Liste des symboles à récupérer.
+        :param chunk_size: Taille maximale des symboles par requête.
+        :return: Liste des résultats combinés ou None en cas d'erreur.
+        """
+        url = "https://data-api.binance.vision/api/v3/ticker"
+        results = []
+
+        # Diviser les symboles en morceaux
+        for i in range(0, len(symbols), chunk_size):
+            chunk = symbols[i:i + chunk_size]  # Prendre un morceau de la liste
+            symbols_json = f'["{"\",\"".join(chunk)}"]'  # Créer la chaîne JSON brute
+
+            try:
+                # Envoyer la requête GET avec les symboles du morceau
+                response = requests.get(f"{url}?symbols={symbols_json}")
+                response.raise_for_status()  # Vérifier si la requête a réussi
+                results.extend(response.json())  # Ajouter les résultats à la liste
+            except requests.exceptions.RequestException as e:
+                logging.log(f"Erreur lors de la requête pour les symboles {chunk}: {e}")
+                return None
+
+        return results  # Retourner tous les résultats combinés
+
     def get_symbol_precision(self, symbol):
         """
         Fetch the price and quantity precision for a given symbol.
