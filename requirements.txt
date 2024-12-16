@@ -1,0 +1,9 @@
+functions-framework==3.*
+requests
+schedule
+google-cloud-storage
+gunicorn
+google-cloud-logging
+pandas
+python-dotenv
+setuptools
