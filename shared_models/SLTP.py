@@ -1,10 +1,10 @@
-from discord import send_discord_webhook
+
 import os
 
 import csv
 import logging
 from google.cloud import storage
-
+from discord import discord
 
 # region SLTP
 class SLTP:
@@ -119,14 +119,14 @@ class SltpManager:
         if sltp.trailingSL == 'No':
             if sltp.comment != tp_hit:
                 message = "{} - sl kept the same .".format(tp_hit)
-                send_discord_webhook(id=sltp.id, message=message, nom=sltp.nom, direction=sltp.direction,
+                discord.send_discord_webhook(id=sltp.id, message=message, nom=sltp.nom, direction=sltp.direction,
                                         harmonic=sltp.harmonic, color=0, current=0, additional="")
                 sltp.comment = tp_hit
         else:
             sltp.sl = new_sl
             if sltp.comment != tp_hit:
                 message = "{} - sl modified to {}.".format(tp_hit, new_sl)
-                send_discord_webhook(id=sltp.id, message=message, nom=sltp.nom, direction=sltp.direction,
+                discord.send_discord_webhook(id=sltp.id, message=message, nom=sltp.nom, direction=sltp.direction,
                                         harmonic=sltp.harmonic, color=0, current=0, additional="")
                 sltp.comment = tp_hit
 
@@ -148,7 +148,7 @@ class SltpManager:
                 if sltp.sl in tp_levels:
                     sltp.comment = 'closed'
                     message = "Closed "
-                    send_discord_webhook(id=sltp.id, message=message, nom=sltp.nom, direction=sltp.direction,
+                    discord.send_discord_webhook(id=sltp.id, message=message, nom=sltp.nom, direction=sltp.direction,
                                             harmonic=sltp.harmonic, owner=sltp.owner, color=0, current=0, additional="")
                 elif sltp.comment != 'invalidated':
                     sltp.direction = 'SHORT'
