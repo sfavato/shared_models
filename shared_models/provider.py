@@ -171,6 +171,7 @@ class Binance:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
 
+    @staticmethod
     def obtenir_tous_les_prix(symbols, chunk_size=100):
         """
         Récupère les prix pour une liste de symboles en effectuant des requêtes en morceaux.

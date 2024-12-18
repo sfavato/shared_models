@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="shared-models",  # Unique name for the package
-    version="0.1.4",       # Package version
+    version="0.1.5",       # Package version
     packages=find_packages(),
     install_requires=[],   # Add any dependencies here
     description="Shared model classes for my harmonic project",
