@@ -267,7 +267,7 @@ class Binance:
         previous_15m_candlestick_start = previous_15m_candlestick_end - \
             (15 * 60 * 1000)
 
-        jsonData = Binance.get_candlestick_data(
+        jsonData = self.get_candlestick_data(
             symbol, previous_15m_candlestick_start, previous_15m_candlestick_end, '15m')
 
         if not jsonData or len(jsonData) == 0:
@@ -327,3 +327,16 @@ class Binance:
         end_of_before_4h_candlestick = previous_4h_candlestick_start
 
         return start_of_before_4h_candlestick, end_of_before_4h_candlestick
+
+
+if __name__ == "__main__":
+    myBinance = Binance()
+    print(myBinance.get_highest_3min("BTC"))
+    print(myBinance.get_highest_15min("BTC"))
+    print(myBinance.calculate_current_timestamps())
+    print(myBinance.calculate_previous_4h_timestamps())
+    print(myBinance.calculate_3d_timestamps())
+    print(myBinance.calculate_previous_two_4h_candlesticks())
+    print(myBinance.get_symbol_precision("BTCUSDT"))
+    print(myBinance.obtenir_tous_les_prix(["BTCUSDT", "ETHUSDT", "BNBUSDT"]))
+    print(myBinance.get_candlestick_data("BTC", 1609459200000, 1609545600000, '4h'))
