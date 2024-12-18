@@ -253,6 +253,8 @@ class Binance:
     # The start_time and end_time parameters should be in milliseconds
     # The symbol parameter should be the trading pair symbol (e.g. "BTC")
     def get_candlestick_data(self,symbol, start_time, end_time, timeframe='4h'):
+        # Strip the USDT suffix from the symbol
+        symbol = symbol.replace("USDT", "")
         base_url = "https://data-api.binance.vision"
         endpoint = f"/api/v3/klines?symbol={symbol}&interval={timeframe}&startTime={start_time}&endTime={end_time}"
 
