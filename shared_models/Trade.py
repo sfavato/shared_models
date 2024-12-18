@@ -65,37 +65,12 @@ class Trade:
         self.confidence = confidence
         self.Invalidation = invalidation
         self.has_3d_close_above = has_3d_close_above
-        self.open_3min = open_3min
-        self.close_3min = close_3min
-        self.high_3min = high_3min
-        self.low_3min = low_3min
-        self.open_4h = open_4h
-        self.close_4h = close_4h
-        self.high_4h = high_4h
-        self.low_4h = low_4h
         
         
 
-    def mise_a_jour_prix(self, data,lastcandle_3min, last_candle_4h):
+    def mise_a_jour_prix(self, data):
         symbol = self.nom + 'USDT'
         
-
-        # find in lastcandle, the candle for the symbol
-        for candle in lastcandle_3min:
-            if candle['symbol'] == symbol:
-                self.open_3min = float(candle['open'])
-                self.close_3min = float(candle['close'])
-                self.high_3min = float(candle['high'])
-                self.low_3min = float(candle['low'])
-                break
-            
-        for candle in last_candle_4h:
-            if candle['symbol'] == symbol:
-                self.open_4h = float(candle['open'])
-                self.close_4h = float(candle['close'])
-                self.high_4h = float(candle['high'])
-                self.low_4h = float(candle['low'])
-                break
 
         for item in data:
             if item['symbol'] == symbol:

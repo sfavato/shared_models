@@ -199,25 +199,6 @@ class Binance:
         return results  # Retourner tous les résultats combinés
     
     
-    def obtenir_all_last_3_minutes_prices(self,symbols):
-    
-        current_timestamp = int(time.time() * 1000)
-        previous_3m_candlestick_end = (
-            current_timestamp // (3 * 60 * 1000)) * (3 * 60 * 1000)
-        previous_3m_candlestick_start = previous_3m_candlestick_end - \
-            (3 * 60 * 1000)
-        last_3minutes = []
-        for symbol in symbols:
-            print(symbol)
-            results = self.get_candlestick_data(symbol, previous_3m_candlestick_start, previous_3m_candlestick_end, '3m')
-        
-            if results is None:
-                print("Failed to retrieve price data for "+ symbol+"...")
-                continue
-            last_3minutes.append(results)
-        print(last_3minutes)
-        return results
-
     def get_symbol_precision(self, symbol):
         """
         Fetch the price and quantity precision for a given symbol.
@@ -362,4 +343,3 @@ if __name__ == "__main__":
     print(myBinance.get_symbol_precision("BTCUSDT"))
     print(myBinance.obtenir_tous_les_prix(["BTCUSDT", "ETHUSDT", "BNBUSDT"]))
     print(myBinance.get_candlestick_data("BTC", 1609459200000, 1609545600000, '4h'))
-    print(myBinance.obtenir_all_last_3_minutes_prices(["BTCUSDT", "ETHUSDT"]))
