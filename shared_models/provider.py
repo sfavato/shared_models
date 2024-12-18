@@ -234,8 +234,7 @@ class Binance:
     # The symbol parameter should be the trading pair symbol (e.g. "BTC")
     def get_candlestick_data(self,symbol, start_time, end_time, timeframe='4h'):
         base_url = "https://data-api.binance.vision"
-        endpoint = f"/api/v3/klines?symbol={
-            symbol}USDT&interval={timeframe}&startTime={start_time}&endTime={end_time}"
+        endpoint = f"/api/v3/klines?symbol={symbol}USDT&interval={timeframe}&startTime={start_time}&endTime={end_time}"
 
         headers = {
             'Content-Type': 'application/json'
