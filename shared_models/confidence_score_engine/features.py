@@ -42,3 +42,36 @@ def calculate_divergence_score(price: pd.Series, cvd: pd.Series, lookback_period
     smoothed_score = divergence_score.rolling(window=5, min_periods=1).sum()
 
     return smoothed_score
+
+
+def oi_weighted_funding_momentum(funding_rate: pd.Series, open_interest: pd.Series, lookback: int) -> pd.Series:
+    """
+    Crée un facteur de sentiment en pondérant la tendance du taux de financement
+    par le momentum de l'Open Interest (OI).
+
+    Un score positif élevé suggère un fort momentum haussier engagé, tandis qu'un
+    score négatif élevé suggère un fort momentum baissier, potentiellement
+    sur-endetté et propice à un retournement.
+
+    Args:
+        funding_rate (pd.Series): Série temporelle des taux de financement.
+        open_interest (pd.Series): Série temporelle de l'Open Interest.
+        lookback (int): La fenêtre glissante pour calculer la tendance et le momentum.
+
+    Returns:
+        pd.Series: Une série temporelle représentant le facteur de sentiment.
+    """
+    # ÉTAPE 1: Calculer le momentum de l'Open Interest.
+    # Utiliser le taux de changement en pourcentage (Rate of Change) sur la période de référence.
+    oi_roc = open_interest.pct_change(periods=lookback)
+
+    # ÉTAPE 2: Calculer la tendance du taux de financement.
+    # Utiliser une moyenne mobile simple sur la même période.
+    funding_ma = funding_rate.rolling(window=lookback).mean()
+
+    # ÉTAPE 3: Calculer le facteur de sentiment.
+    # La formule est la tendance du financement, amplifiée par la croissance de l'OI.
+    # Remplir les valeurs NaN initiales du RoC avec 0 pour ne pas perdre de points de données.
+    sentiment_factor = funding_ma * (1 + oi_roc.fillna(0))
+
+    return sentiment_factor
