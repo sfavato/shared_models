@@ -9,3 +9,4 @@ python-dotenv
 setuptools
 scikit-learn
 numpy
+pytest

@@ -45,8 +45,8 @@ def generate_confidence_scores(
 
     # ÉTAPE 3: Gérer les valeurs manquantes.
     # Remplir les NaN qui peuvent résulter des fenêtres glissantes avant de traiter.
-    features_df.fillna(method='bfill', inplace=True) # Rétro-propagation
-    features_df.fillna(method='ffill', inplace=True) # Propagation avant
+    features_df.bfill(inplace=True) # Rétro-propagation
+    features_df.ffill(inplace=True) # Propagation avant
 
     if features_df.empty or features_df.isnull().values.any():
         # Si le DataFrame est toujours vide ou contient des NaN, retourner un tableau vide.

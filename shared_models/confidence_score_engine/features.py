@@ -63,7 +63,8 @@ def oi_weighted_funding_momentum(funding_rate: pd.Series, open_interest: pd.Seri
     """
     # ÉTAPE 1: Calculer le momentum de l'Open Interest.
     # Utiliser le taux de changement en pourcentage (Rate of Change) sur la période de référence.
-    oi_roc = open_interest.pct_change(periods=lookback)
+    # fill_method=None est spécifié pour se conformer aux futures versions de pandas.
+    oi_roc = open_interest.pct_change(periods=lookback, fill_method=None)
 
     # ÉTAPE 2: Calculer la tendance du taux de financement.
     # Utiliser une moyenne mobile simple sur la même période.
