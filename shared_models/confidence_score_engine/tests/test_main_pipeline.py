@@ -1,6 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
+import time
 from shared_models.confidence_score_engine.main import generate_confidence_scores
 
 @pytest.fixture
@@ -82,3 +83,58 @@ def test_generate_confidence_scores_all_nans_input():
     # If all data is NaN, the fillna logic can't fix it, should return an empty array
     assert isinstance(processed_features, np.ndarray)
     assert processed_features.size == 0
+
+
+def test_output_statistical_properties_and_performance():
+    """
+    Valide les propriétés statistiques des features en sortie et mesure la performance.
+    Ce test simule une charge de travail réaliste.
+    """
+    # ÉTAPE 1: Créer un jeu de données réaliste et de taille significative.
+    num_rows = 10000  # Simule un historique de données conséquent
+    lookback = 20
+    data = {
+        'price': np.random.randn(num_rows).cumsum() + 100,
+        'cvd': np.random.randn(num_rows).cumsum(),
+        'open_interest': np.random.randn(num_rows).cumsum() + 1000,
+        'funding_rate': np.random.randn(num_rows) * 0.0001,
+        'long_liquidations': np.random.randint(0, 100, size=num_rows),
+        'short_liquidations': np.random.randint(0, 100, size=num_rows)
+    }
+    df = pd.DataFrame(data)
+
+    # ÉTAPE 2: Mesurer le temps d'exécution.
+    start_time = time.time()
+
+    processed_features = generate_confidence_scores(
+        price=df['price'],
+        cvd=df['cvd'],
+        open_interest=df['open_interest'],
+        funding_rate=df['funding_rate'],
+        long_liquidations=df['long_liquidations'],
+        short_liquidations=df['short_liquidations'],
+        lookback_period=lookback
+    )
+
+    end_time = time.time()
+    execution_time = end_time - start_time
+
+    print(f"Execution time for {num_rows} rows: {execution_time:.4f} seconds")
+
+    # ÉTAPE 3: Valider la performance.
+    # Le calcul pour 10k lignes doit être très rapide.
+    assert execution_time < 1.0  # Fails if execution takes more than 1 second.
+
+    # ÉTAPE 4: Valider les propriétés statistiques des données en sortie.
+    # Après le QuantileTransformer(output_distribution='normal'),
+    # la moyenne de chaque composante doit être proche de 0 et l'écart-type proche de 1.
+
+    # Le DataFrame initial peut contenir des NaNs au début à cause des rollings.
+    # La fonction `generate_confidence_scores` les gère, mais la sortie peut être plus courte.
+    assert processed_features.shape[0] > 0
+
+    # On vérifie la moyenne et l'écart-type pour chaque composante principale (colonne).
+    for i in range(processed_features.shape[1]):
+        column = processed_features[:, i]
+        assert np.isclose(np.mean(column), 0, atol=0.2), f"Mean of component {i} is not close to 0"
+        assert np.isclose(np.std(column), 1, atol=0.2), f"Std dev of component {i} is not close to 1"
