@@ -7,3 +7,6 @@ google-cloud-logging
 pandas
 python-dotenv
 setuptools
+scikit-learn
+numpy
+pytest

@@ -1,36 +1,59 @@
 import pandas as pd
-from .calculator import calculate_zscore_momentum
-from .utils import normalize_score
+import numpy as np
+from .features import calculate_divergence_score, oi_weighted_funding_momentum, trapped_trader_score
+from .pipeline import preprocessing_pipeline
 
-def compute_confidence_score(derivatives_df: pd.DataFrame) -> pd.DataFrame:
+def generate_confidence_scores(
+    price: pd.Series,
+    cvd: pd.Series,
+    open_interest: pd.Series,
+    funding_rate: pd.Series,
+    long_liquidations: pd.Series,
+    short_liquidations: pd.Series,
+    lookback_period: int = 20
+) -> np.ndarray:
     """
-    Orchestre le processus de calcul du Score de Confiance.
+    Orchestre le calcul complet des scores de confiance.
 
-    a. Appelle calculate_zscore_momentum sur les colonnes open_interest et funding_rate.
-    b. Appelle normalize_score sur chacun des Z-scores obtenus.
-    c. Calcule le Score de Confiance Composite en faisant la moyenne simple des deux scores normalisés.
-    d. Retourne le DataFrame original enrichi avec les colonnes des scores intermédiaires et du score final.
+    Cette fonction prend les séries temporelles brutes, calcule tous les facteurs,
+    les combine, puis les traite à travers le pipeline de prétraitement.
+
+    Args:
+        price (pd.Series): Série des prix.
+        cvd (pd.Series): Série du Cumulative Volume Delta.
+        open_interest (pd.Series): Série de l'Open Interest.
+        funding_rate (pd.Series): Série des taux de financement.
+        long_liquidations (pd.Series): Série des liquidations 'long'.
+        short_liquidations (pd.Series): Série des liquidations 'short'.
+        lookback_period (int, optional): Fenêtre de calcul pour les facteurs. Defaults to 20.
+
+    Returns:
+        np.ndarray: Un tableau NumPy contenant les caractéristiques finales,
+                    normalisées et dé-corrélées, prêtes pour un modèle ML.
     """
-    result_df = derivatives_df.copy()
+    # ÉTAPE 1: Calculer chaque facteur brut en utilisant les fonctions importées.
+    divergence = calculate_divergence_score(price, cvd, lookback_period)
+    momentum = oi_weighted_funding_momentum(funding_rate, open_interest, lookback_period)
+    trapped_traders = trapped_trader_score(price, cvd, long_liquidations, short_liquidations, lookback_period)
 
-    # Étape 1: Calculer les Z-Scores
-    oi_zscore = calculate_zscore_momentum(result_df['open_interest'])
-    fr_zscore = calculate_zscore_momentum(result_df['funding_rate'])
+    # ÉTAPE 2: Combiner les facteurs en un seul DataFrame.
+    features_df = pd.DataFrame({
+        'divergence_score': divergence,
+        'oi_funding_momentum': momentum,
+        'trapped_trader_score': trapped_traders
+    })
 
-    result_df['oi_zscore'] = oi_zscore
-    result_df['fr_zscore'] = fr_zscore
+    # ÉTAPE 3: Gérer les valeurs manquantes.
+    # Remplir les NaN qui peuvent résulter des fenêtres glissantes avant de traiter.
+    features_df.bfill(inplace=True) # Rétro-propagation
+    features_df.ffill(inplace=True) # Propagation avant
 
-    # Étape 2: Normaliser les Scores
-    # La normalisation est calculée sur la partie non-NaN des z-scores.
-    # Le résultat sera une série avec des NaNs pour la fenêtre initiale, ce qui est correct.
-    oi_normalized = normalize_score(oi_zscore.dropna())
-    fr_normalized = normalize_score(fr_zscore.dropna())
+    if features_df.empty or features_df.isnull().values.any():
+        # Si le DataFrame est toujours vide ou contient des NaN, retourner un tableau vide.
+        return np.array([])
 
-    result_df['oi_normalized_score'] = oi_normalized
-    result_df['fr_normalized_score'] = fr_normalized
+    # ÉTAPE 4: Appliquer le pipeline de prétraitement.
+    # Le pipeline s'occupe de la normalisation (Quantile) et de la dé-corrélation (PCA).
+    processed_features = preprocessing_pipeline.fit_transform(features_df)
 
-    # Étape 3: Calculer le Score Composite
-    # La moyenne propagera correctement les NaNs.
-    result_df['confidence_score'] = (result_df['oi_normalized_score'] + result_df['fr_normalized_score']) / 2
-
-    return result_df
+    return processed_features
