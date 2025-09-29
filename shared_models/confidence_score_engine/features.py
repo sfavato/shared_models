@@ -75,3 +75,49 @@ def oi_weighted_funding_momentum(funding_rate: pd.Series, open_interest: pd.Seri
     sentiment_factor = funding_ma * (1 + oi_roc.fillna(0))
 
     return sentiment_factor
+
+
+def trapped_trader_score(price: pd.Series, cvd: pd.Series, long_liquidations: pd.Series, short_liquidations: pd.Series, lookback: int) -> pd.Series:
+    """
+    Calcule un score indiquant la probabilité d'une activité récente de traders piégés.
+
+    Le score est élevé lorsqu'un retournement brusque du prix et du CVD se produit
+    simultanément, surtout s'il est confirmé par un pic de liquidations.
+
+    Args:
+        price (pd.Series): Série temporelle des prix.
+        cvd (pd.Series): Série temporelle du Cumulative Volume Delta.
+        long_liquidations (pd.Series): Série temporelle des liquidations 'long'.
+        short_liquidations (pd.Series): Série temporelle des liquidations 'short'.
+        lookback (int): La fenêtre glissante pour les calculs d'accélération et de pics.
+
+    Returns:
+        pd.Series: Une série temporelle contenant le score final lissé des traders piégés.
+    """
+    # ÉTAPE 1: Identifier les retournements brusques de prix via l'accélération.
+    # L'accélération est la dérivée seconde (différence de la différence).
+    price_acceleration = price.diff().diff().abs()
+    price_reversal_signal = price_acceleration.rolling(window=lookback).mean()
+
+    # ÉTAPE 2: Identifier les retournements brusques de flux (CVD) via l'accélération.
+    cvd_acceleration = cvd.diff().diff().abs()
+    cvd_reversal_signal = cvd_acceleration.rolling(window=lookback).mean()
+
+    # ÉTAPE 3: Identifier les pics de liquidations.
+    # Un pic est défini comme un volume total de liquidations dépassant la moyenne
+    # plus 2 écarts-types sur une fenêtre plus longue.
+    total_liquidations = long_liquidations + short_liquidations
+    liq_baseline = total_liquidations.rolling(window=lookback * 5).mean()
+    liq_std = total_liquidations.rolling(window=lookback * 5).std()
+    is_liquidation_spike = (total_liquidations > (liq_baseline + 2 * liq_std)).astype(int)
+
+    # ÉTAPE 4: Combiner les signaux pour créer le score.
+    # On multiplie les signaux de retournement et on normalise le résultat
+    # en utilisant le rang en percentile pour le rendre comparable.
+    base_score = (price_reversal_signal * cvd_reversal_signal).rank(pct=True)
+
+    # Le pic de liquidation agit comme un "amplificateur" du score de base.
+    trapped_score = base_score + is_liquidation_spike
+
+    # ÉTAPE 5: Lisser le score final pour plus de stabilité.
+    return trapped_score.rolling(window=3).mean()
