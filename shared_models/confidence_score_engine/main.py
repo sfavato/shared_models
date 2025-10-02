@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from .features import calculate_divergence_score, oi_weighted_funding_momentum, trapped_trader_score
-from .pipeline import preprocessing_pipeline
+from .pipeline import PreprocessingPipeline
 
 def generate_confidence_scores(
     price: pd.Series,
@@ -32,13 +32,15 @@ def generate_confidence_scores(
     # ÉTAPE 4: Combiner les facteurs en un seul DataFrame.
     features_df = pd.DataFrame(features)
 
-    # ... (Le reste de la fonction : gestion des NaN et application du pipeline) ...
-    features_df.fillna(method='bfill', inplace=True)
-    features_df.fillna(method='ffill', inplace=True)
+    # ... (The rest of the function: NaN handling and pipeline application) ...
+    features_df.bfill(inplace=True)
+    features_df.ffill(inplace=True)
 
     if features_df.empty or features_df.isnull().values.any():
         return np.array([])
 
-    processed_features = preprocessing_pipeline.fit_transform(features_df)
+    # Instantiate and use the preprocessing pipeline
+    pipeline = PreprocessingPipeline()
+    processed_features_df = pipeline.fit_transform(features_df)
 
-    return processed_features
+    return processed_features_df.to_numpy()
