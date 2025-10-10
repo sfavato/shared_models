@@ -1,10 +1,13 @@
 import pytest
 import pandas as pd
 import numpy as np
+from unittest.mock import MagicMock
 from shared_models.confidence_score_engine.features import (
     calculate_divergence_score,
     oi_weighted_funding_momentum,
-    trapped_trader_score
+    trapped_trader_score,
+    calculate_geometric_purity_score,
+    get_historical_performance_score,
 )
 
 LOOKBACK = 5
@@ -88,3 +91,75 @@ def test_trapped_trader_score_liquidation_spike(sample_data):
     # The liquidation spike adds 1.0 to the base score.
     # The base score can be 0, so we check for >= 1.0
     assert unsmoothed_score.iloc[-1] >= 1.0
+
+
+# Tests for calculate_geometric_purity_score
+def test_perfect_gartley_purity():
+    """Test a geometrically perfect Gartley pattern returns a score of 10."""
+    pattern = {
+        'name': 'Gartley',
+        'ratios': {'B': 0.618, 'C': 0.786, 'D': 0.786, 'XA': 0.786}
+    }
+    assert calculate_geometric_purity_score(pattern) == pytest.approx(10.0)
+
+def test_imperfect_bat_purity():
+    """Test an imperfect Bat pattern returns a score less than 10."""
+    pattern = {
+        'name': 'Bat',
+        'ratios': {'B': 0.55, 'C': 0.80, 'D': 0.90, 'XA': 0.85} # Deviations
+    }
+    assert calculate_geometric_purity_score(pattern) < 10.0
+
+def test_unknown_pattern_purity():
+    """Test that an unrecognized pattern returns a score of 0."""
+    pattern = {'name': 'Unknown', 'ratios': {'B': 0.5}}
+    assert calculate_geometric_purity_score(pattern) == 0.0
+
+def test_missing_ratios_purity():
+    """Test that a pattern with a single perfect ratio still yields a perfect score."""
+    pattern = {'name': 'Gartley', 'ratios': {'B': 0.618}}
+    assert calculate_geometric_purity_score(pattern) == pytest.approx(10.0)
+
+# Tests for get_historical_performance_score
+@pytest.fixture
+def mock_db_connection():
+    """Fixture to create a mock database connection."""
+    mock_conn = MagicMock()
+    mock_cursor = MagicMock()
+    mock_conn.cursor.return_value = mock_cursor
+    return mock_conn, mock_cursor
+
+def test_high_win_rate_performance(mock_db_connection):
+    """Test win rate > 70% gives a +1.5 bonus."""
+    mock_conn, mock_cursor = mock_db_connection
+    mock_cursor.fetchall.return_value = [(0.75,), (0.8,)] # Average > 0.7
+    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDT', 'timeframe': '1h'}
+    assert get_historical_performance_score(pattern, mock_conn) == 1.5
+
+def test_medium_win_rate_performance(mock_db_connection):
+    """Test win rate between 50-70% gives a +0.5 bonus."""
+    mock_conn, mock_cursor = mock_db_connection
+    mock_cursor.fetchall.return_value = [(0.6,), (0.65,)] # Average between 0.5 and 0.7
+    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDT', 'timeframe': '1h'}
+    assert get_historical_performance_score(pattern, mock_conn) == 0.5
+
+def test_low_win_rate_performance(mock_db_connection):
+    """Test win rate < 40% gives a -1.0 malus."""
+    mock_conn, mock_cursor = mock_db_connection
+    mock_cursor.fetchall.return_value = [(0.3,), (0.35,)] # Average < 0.4
+    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDT', 'timeframe': '1h'}
+    assert get_historical_performance_score(pattern, mock_conn) == -1.0
+
+def test_no_history_performance(mock_db_connection):
+    """Test no historical data returns a neutral score of 0."""
+    mock_conn, mock_cursor = mock_db_connection
+    mock_cursor.fetchall.return_value = [] # No records
+    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDT', 'timeframe': '1h'}
+    assert get_historical_performance_score(pattern, mock_conn) == 0.0
+
+def test_db_error_performance(mock_db_connection):
+    """Test a database error returns a neutral score of 0."""
+    mock_conn, mock_cursor = mock_db_connection
+    mock_cursor.execute.side_effect = Exception("DB Error")
+    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDT', 'timeframe': '1h'}
+    assert get_historical_performance_score(pattern, mock_conn) == 0.0

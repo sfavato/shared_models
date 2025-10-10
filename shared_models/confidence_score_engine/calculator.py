@@ -1,4 +1,5 @@
 import pandas as pd
+from .features import calculate_geometric_purity_score, get_historical_performance_score
 
 def calculate_zscore_momentum(series: pd.Series, window: int = 24) -> pd.Series:
     """
@@ -45,3 +46,44 @@ def calculate_derivatives_score(derivatives_data: pd.DataFrame) -> int:
             score -= 2
 
     return score
+
+def calculate_final_score(
+    pattern_details: dict,
+    derivatives_data: pd.DataFrame,
+    db_connection
+) -> float:
+    """
+    Calcule le score de confiance final en agrégeant les scores des différentes features.
+
+    Args:
+        pattern_details (dict): Détails du pattern harmonique.
+        derivatives_data (pd.DataFrame): Données sur les dérivés (OI, funding rate).
+        db_connection: Connexion à la base de données pour les données historiques.
+
+    Returns:
+        float: Le score de confiance final.
+    """
+    # Poids pour chaque composant du score
+    WEIGHTS = {
+        'geometric_purity': 0.6,
+        'derivatives': 0.4
+    }
+
+    # Calculer le score de pureté géométrique (Base score: 0-10)
+    geometric_score = calculate_geometric_purity_score(pattern_details)
+
+    # Calculer le score des dérivés (Score: -2 à +3 typiquement)
+    derivatives_score = calculate_derivatives_score(derivatives_data)
+
+    # Calculer le score de performance historique (Bonus/Malus: -1.0, 0.5, 1.5)
+    historical_bonus = get_historical_performance_score(pattern_details, db_connection)
+
+    # Calculer le score pondéré
+    weighted_score = (geometric_score * WEIGHTS['geometric_purity']) + \
+                     (derivatives_score * WEIGHTS['derivatives'])
+
+    # Ajouter le bonus/malus historique
+    final_score = weighted_score + historical_bonus
+
+    # S'assurer que le score final reste dans une plage raisonnable (ex: 0-10)
+    return max(0, min(10, final_score))
