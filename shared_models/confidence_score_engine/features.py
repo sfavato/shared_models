@@ -122,3 +122,109 @@ def trapped_trader_score(price: pd.Series, cvd: pd.Series, long_liquidations: pd
 
     # ÉTAPE 5: Lisser le score final pour plus de stabilité.
     return trapped_score.rolling(window=3).mean()
+
+
+def calculate_geometric_purity_score(pattern_details: dict) -> float:
+    """
+    Calcule un score de "pureté géométrique" pour un pattern harmonique.
+
+    Le score est basé sur la proximité des ratios réels du pattern par rapport
+    aux ratios de Fibonacci idéaux.
+
+    Args:
+        pattern_details (dict): Un dictionnaire contenant:
+            - 'name' (str): Le nom du pattern (ex: 'Gartley').
+            - 'ratios' (dict): Un dictionnaire des ratios mesurés (ex: {'B': 0.618, 'C': 0.786, ...}).
+
+    Returns:
+        float: Un score normalisé entre 0 et 10, où 10 est un pattern parfait.
+    """
+    IDEAL_RATIOS = {
+        'Gartley': {'B': 0.618, 'C': 0.786, 'D': 0.786, 'XA': 0.786},
+        'Butterfly': {'B': 0.786, 'C': 0.886, 'D': 1.272, 'XA': 1.272},
+        'Bat': {'B': 0.5, 'C': 0.886, 'D': 0.886, 'XA': 0.886},
+        'Crab': {'B': 0.618, 'C': 0.886, 'D': 1.618, 'XA': 1.618}
+    }
+
+    pattern_name = pattern_details.get('name')
+    actual_ratios = pattern_details.get('ratios', {})
+
+    if pattern_name not in IDEAL_RATIOS:
+        return 0.0  # Pattern non reconnu
+
+    ideal = IDEAL_RATIOS[pattern_name]
+    errors = []
+
+    for point, ideal_ratio in ideal.items():
+        actual_ratio = actual_ratios.get(point)
+        if actual_ratio is not None:
+            error = (actual_ratio - ideal_ratio) ** 2
+            errors.append(error)
+
+    if not errors:
+        return 0.0
+
+    # Calcul de l'erreur quadratique moyenne (MSE)
+    mse = sum(errors) / len(errors)
+
+    # Normalisation du score: 1 / (1 + MSE) pour borner entre 0 et 1, puis mise à l'échelle sur 10.
+    # Un MSE de 0 donne un score de 10 (parfait).
+    # Un MSE de 0.1 donne un score de ~9.09.
+    # Un MSE de 1.0 donne un score de 5.0.
+    normalized_score = 1 / (1 + mse)
+    final_score = normalized_score * 10
+
+    return final_score
+
+
+def get_historical_performance_score(pattern_details: dict, db_connection) -> float:
+    """
+    Calcule un score bonus/malus basé sur la performance historique d'un pattern.
+
+    Args:
+        pattern_details (dict): Dictionnaire contenant les détails du pattern
+                                (name, symbol, timeframe).
+        db_connection: Une connexion à la base de données pour exécuter des requêtes.
+
+    Returns:
+        float: Un score de type bonus/malus.
+    """
+    pattern_name = pattern_details.get('name')
+    symbol = pattern_details.get('symbol')
+    timeframe = pattern_details.get('timeframe')
+
+    if not all([pattern_name, symbol, timeframe, db_connection]):
+        return 0.0
+
+    try:
+        cursor = db_connection.cursor()
+        query = """
+            SELECT win_rate
+            FROM trades_log
+            WHERE pattern_name = %s AND symbol = %s AND timeframe = %s
+            ORDER BY trade_date DESC
+            LIMIT 100;
+        """
+        cursor.execute(query, (pattern_name, symbol, timeframe))
+        results = cursor.fetchall()
+
+        if not results:
+            return 0.0  # Pas d'historique, score neutre
+
+        # Calculer le win rate moyen des trades historiques
+        win_rates = [row[0] for row in results]
+        average_win_rate = sum(win_rates) / len(win_rates)
+
+        # Appliquer le barème de bonus/malus
+        if average_win_rate > 0.7:
+            return 1.5
+        elif average_win_rate > 0.5:
+            return 0.5
+        elif average_win_rate < 0.4:
+            return -1.0
+        else:
+            return 0.0  # Score neutre pour une performance moyenne
+
+    except Exception as e:
+        print(f"Database error in get_historical_performance_score: {e}")
+        return 0.0  # En cas d'erreur, retourner un score neutre
