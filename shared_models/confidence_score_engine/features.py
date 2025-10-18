@@ -225,3 +225,102 @@ def get_historical_performance_score(pattern_details: dict, db_connection) -> fl
     except Exception as e:
         print(f"Database error in get_historical_performance_score: {e}")
         return 0.0  # En cas d'erreur, retourner un score neutre
+
+
+def calculate_mvrv_score(mvrv_series: pd.Series) -> pd.Series:
+    """
+    Calcule un score basé sur le MVRV (Market Value to Realized Value).
+    Gère robustement les données manquantes. Un MVRV élevé suggère que le marché
+    est surévalué (signal baissier), tandis qu'un MVRV bas suggère une
+    sous-évaluation (signal haussier).
+
+    Args:
+        mvrv_series (pd.Series): Série temporelle des valeurs MVRV.
+
+    Returns:
+        pd.Series: Une série de scores normalisés entre 0 et 1.
+    """
+    # Remplir les NaN avec une valeur neutre (ex: 1.0) pour le calcul
+    mvrv_series_filled = mvrv_series.fillna(1.0)
+
+    # Logique de scoring:
+    # MVRV > 3.0 -> Danger, score proche de 0.1 (baissier)
+    # MVRV < 1.0 -> Opportunité, score proche de 0.9 (haussier)
+    # Entre 1.0 et 3.0 -> Zone neutre, score autour de 0.5
+    score = np.where(mvrv_series_filled > 3.0, 0.1,
+                   np.where(mvrv_series_filled < 1.0, 0.9, 0.5))
+
+    # S'assurer que les NaN d'origine retournent un score neutre (0.5)
+    score[mvrv_series.isna()] = 0.5
+
+    return pd.Series(score, index=mvrv_series.index)
+
+
+def calculate_exchange_netflow_score(netflow_series: pd.Series) -> pd.Series:
+    """
+    Calcule un score basé sur le flux net des exchanges.
+    Gère robustement les données manquantes. Un netflow fortement négatif
+    (sorties massives) est haussier, tandis qu'un netflow positif (entrées)
+    est baissier.
+
+    Args:
+        netflow_series (pd.Series): Série temporelle des flux nets.
+
+    Returns:
+        pd.Series: Une série de scores normalisés.
+    """
+    # Gérer les NaNs en retournant un score neutre
+    if netflow_series.isnull().all():
+        return pd.Series(0.5, index=netflow_series.index)
+
+    # Remplir les NaN restants pour le calcul du Z-score
+    netflow_filled = netflow_series.fillna(0)
+
+    # Utiliser un Z-score pour normaliser le netflow
+    mean = netflow_filled.rolling(window=30, min_periods=1).mean()
+    std = netflow_filled.rolling(window=30, min_periods=1).std().replace(0, np.nan).fillna(method='ffill')
+
+    z_score = (netflow_filled - mean) / std
+    z_score.fillna(0, inplace=True) # Remplacer les NaN du Z-score par 0
+
+    # Convertir le Z-score en score de 0 à 1 (fonction sigmoïde inversée)
+    # Un Z-score négatif (sortie) doit donner un score > 0.5 (haussier)
+    # Un Z-score positif (entrée) doit donner un score < 0.5 (baissier)
+    score = 1 / (1 + np.exp(z_score))
+
+    # S'assurer que les NaN d'origine retournent un score neutre (0.5)
+    score[netflow_series.isna()] = 0.5
+
+    return pd.Series(score, index=netflow_series.index)
+
+
+def calculate_whale_activity_score(whale_activity_series: pd.Series) -> pd.Series:
+    """
+    Calcule un score basé sur l'activité des baleines (gros détenteurs).
+    Gère les données manquantes. Une augmentation significative de l'activité
+    des baleines peut signaler une volatilité à venir.
+
+    Args:
+        whale_activity_series (pd.Series): Série temporelle de l'activité des baleines.
+
+    Returns:
+        pd.Series: Une série de scores.
+    """
+    # Gérer les NaNs en retournant un score neutre
+    if whale_activity_series.isnull().all():
+        return pd.Series(0.5, index=whale_activity_series.index)
+
+    whale_activity_filled = whale_activity_series.fillna(method='ffill')
+
+    # Calculer le taux de changement pour détecter les pics d'activité
+    roc = whale_activity_filled.pct_change(periods=7).fillna(0)
+
+    # Un ROC élevé (> 0.2) peut indiquer une accumulation (haussier)
+    # Un ROC très négatif (< -0.2) peut indiquer une distribution (baissier)
+    score = np.where(roc > 0.2, 0.8,
+                   np.where(roc < -0.2, 0.2, 0.5)) # Neutre sinon
+
+    # S'assurer que les NaN d'origine retournent un score neutre
+    score[whale_activity_series.isna()] = 0.5
+
+    return pd.Series(score, index=whale_activity_series.index)
