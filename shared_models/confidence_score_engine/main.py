@@ -1,6 +1,13 @@
 import pandas as pd
 import numpy as np
-from .features import calculate_divergence_score, oi_weighted_funding_momentum, trapped_trader_score
+from .features import (
+    calculate_divergence_score,
+    oi_weighted_funding_momentum,
+    trapped_trader_score,
+    calculate_mvrv_score,
+    calculate_exchange_netflow_score,
+    calculate_whale_activity_score
+)
 from .pipeline import PreprocessingPipeline
 
 def generate_confidence_scores(
@@ -11,9 +18,7 @@ def generate_confidence_scores(
     Orchestre le calcul complet des scores de confiance à partir d'un DataFrame consolidé.
 
     Args:
-        merged_df (pd.DataFrame): DataFrame contenant toutes les séries de données nécessaires,
-                                  y compris 'close', 'CVD', 'open_interest', 'funding_rate',
-                                  'long_liquidations_usd', et 'short_liquidations_usd'.
+        merged_df (pd.DataFrame): DataFrame contenant toutes les séries de données nécessaires.
         lookback_period (int): La fenêtre glissante pour les calculs de features.
 
     Returns:
@@ -27,14 +32,17 @@ def generate_confidence_scores(
     cvd = merged_df['CVD']
     open_interest = merged_df['open_interest']
     funding_rate = merged_df['funding_rate']
-    long_liquidations = merged_df.get('long_liquidations_usd')  # Utiliser .get() pour la flexibilité
+    long_liquidations = merged_df.get('long_liquidations_usd')
     short_liquidations = merged_df.get('short_liquidations_usd')
+    mvrv = merged_df.get('mvrv_usd')
+    netflow = merged_df.get('exchange_netflow_usd')
+    whale_activity = merged_df.get('whale_transaction_volume_usd')
 
-    # ÉTAPE 2: Calculer les facteurs de base (toujours présents).
+    # ÉTAPE 2: Calculer les facteurs de base.
     features['divergence_score'] = calculate_divergence_score(price, cvd, lookback_period)
     features['oi_funding_momentum'] = oi_weighted_funding_momentum(funding_rate, open_interest, lookback_period)
 
-    # ÉTAPE 3: Calculer les facteurs optionnels seulement si les données sont fournies.
+    # ÉTAPE 3: Calculer les facteurs optionnels (liquidations, on-chain).
     if long_liquidations is not None and short_liquidations is not None:
         features['trapped_trader_score'] = trapped_trader_score(
             price_close=price,
@@ -42,6 +50,13 @@ def generate_confidence_scores(
             short_liquidations=short_liquidations,
             window=lookback_period
         )
+
+    if mvrv is not None:
+        features['mvrv_score'] = calculate_mvrv_score(mvrv)
+    if netflow is not None:
+        features['netflow_score'] = calculate_exchange_netflow_score(netflow)
+    if whale_activity is not None:
+        features['whale_activity_score'] = calculate_whale_activity_score(whale_activity)
 
     # ÉTAPE 4: Combiner les facteurs en un seul DataFrame.
     features_df = pd.DataFrame(features)
