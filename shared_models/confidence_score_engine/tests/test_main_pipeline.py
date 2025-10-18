@@ -5,30 +5,24 @@ from shared_models.confidence_score_engine.main import generate_confidence_score
 
 @pytest.fixture
 def market_data_fixture():
-    """Provides a realistic, valid dataset for the main pipeline test."""
+    """Provides a realistic, valid DataFrame for the main pipeline test."""
     size = 100
     np.random.seed(42)
-    return {
-        'price': pd.Series(np.linspace(100, 150, size)),
-        'cvd': pd.Series(np.linspace(1000, 1500, size)),
+    data = {
+        'close': pd.Series(np.linspace(100, 150, size)),
+        'CVD': pd.Series(np.linspace(1000, 1500, size)),
         'open_interest': pd.Series(np.linspace(5000, 6000, size)),
         'funding_rate': pd.Series(np.random.normal(0.01, 0.005, size)),
-        'long_liquidations': pd.Series(np.random.randint(0, 100, size)),
-        'short_liquidations': pd.Series(np.random.randint(0, 100, size))
+        'long_liquidations_usd': pd.Series(np.random.randint(0, 100, size), dtype=float),
+        'short_liquidations_usd': pd.Series(np.random.randint(0, 100, size), dtype=float)
     }
+    return pd.DataFrame(data)
 
 def test_generate_confidence_scores_happy_path(market_data_fixture):
     """
     Tests the full pipeline with valid data, checking output shape and quality.
     """
-    processed_features = generate_confidence_scores(
-        price=market_data_fixture['price'],
-        cvd=market_data_fixture['cvd'],
-        open_interest=market_data_fixture['open_interest'],
-        funding_rate=market_data_fixture['funding_rate'],
-        long_liquidations=market_data_fixture['long_liquidations'],
-        short_liquidations=market_data_fixture['short_liquidations']
-    )
+    processed_features = generate_confidence_scores(market_data_fixture)
 
     assert isinstance(processed_features, np.ndarray)
     assert not np.isnan(processed_features).any()
@@ -43,19 +37,12 @@ def test_generate_confidence_scores_with_nans(market_data_fixture):
     Tests the pipeline's robustness when input data contains NaNs.
     The pipeline should handle them gracefully.
     """
-    data = market_data_fixture
+    df = market_data_fixture
     # Introduce NaNs at the beginning of two series
-    data['price'].iloc[:15] = np.nan
-    data['cvd'].iloc[:15] = np.nan
+    df['close'].iloc[:15] = np.nan
+    df['CVD'].iloc[:15] = np.nan
 
-    processed_features = generate_confidence_scores(
-        price=data['price'],
-        cvd=data['cvd'],
-        open_interest=data['open_interest'],
-        funding_rate=data['funding_rate'],
-        long_liquidations=data['long_liquidations'],
-        short_liquidations=data['short_liquidations']
-    )
+    processed_features = generate_confidence_scores(df)
 
     # The function should still run and return a valid array without NaNs
     assert isinstance(processed_features, np.ndarray)
@@ -66,16 +53,16 @@ def test_generate_confidence_scores_all_nans_input():
     Tests the edge case where all input data is NaN. This should result in an empty array.
     """
     size = 100
-    nan_series = pd.Series([np.nan] * size)
+    nan_df = pd.DataFrame({
+        'close': pd.Series([np.nan] * size),
+        'CVD': pd.Series([np.nan] * size),
+        'open_interest': pd.Series([np.nan] * size),
+        'funding_rate': pd.Series([np.nan] * size),
+        'long_liquidations_usd': pd.Series([np.nan] * size),
+        'short_liquidations_usd': pd.Series([np.nan] * size),
+    })
 
-    processed_features = generate_confidence_scores(
-        price=nan_series,
-        cvd=nan_series,
-        open_interest=nan_series,
-        funding_rate=nan_series,
-        long_liquidations=nan_series,
-        short_liquidations=nan_series
-    )
+    processed_features = generate_confidence_scores(nan_df)
 
     assert isinstance(processed_features, np.ndarray)
     assert processed_features.size == 0
@@ -85,14 +72,7 @@ def test_output_statistical_properties(market_data_fixture):
     Validates that the output features are correctly normalized (mean ~0, std ~1)
     after the quantile transformation and PCA.
     """
-    processed_features = generate_confidence_scores(
-        price=market_data_fixture['price'],
-        cvd=market_data_fixture['cvd'],
-        open_interest=market_data_fixture['open_interest'],
-        funding_rate=market_data_fixture['funding_rate'],
-        long_liquidations=market_data_fixture['long_liquidations'],
-        short_liquidations=market_data_fixture['short_liquidations']
-    )
+    processed_features = generate_confidence_scores(market_data_fixture)
 
     assert processed_features.shape[0] > 0
 
