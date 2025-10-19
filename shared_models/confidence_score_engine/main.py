@@ -6,7 +6,7 @@ from .features import (
     trapped_trader_score,
     calculate_mvrv_score,
     calculate_exchange_netflow_score,
-    calculate_whale_activity_score
+    calculate_whale_accumulation_score
 )
 from .pipeline import PreprocessingPipeline
 
@@ -36,7 +36,7 @@ def generate_confidence_scores(
     short_liquidations = merged_df.get('short_liquidations_usd')
     mvrv = merged_df.get('mvrv_usd')
     netflow = merged_df.get('exchange_netflow_usd')
-    whale_activity = merged_df.get('whale_transaction_volume_usd')
+    whale_accumulation = merged_df.get('whale_accumulation_delta')
 
     # ÉTAPE 2: Calculer les facteurs de base.
     features['divergence_score'] = calculate_divergence_score(price, cvd, lookback_period)
@@ -55,8 +55,8 @@ def generate_confidence_scores(
         features['mvrv_score'] = calculate_mvrv_score(mvrv)
     if netflow is not None:
         features['netflow_score'] = calculate_exchange_netflow_score(netflow)
-    if whale_activity is not None:
-        features['whale_activity_score'] = calculate_whale_activity_score(whale_activity)
+    if whale_accumulation is not None:
+        features['whale_accumulation_score'] = calculate_whale_accumulation_score(whale_accumulation)
 
     # ÉTAPE 4: Combiner les facteurs en un seul DataFrame.
     features_df = pd.DataFrame(features)

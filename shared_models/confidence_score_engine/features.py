@@ -227,100 +227,72 @@ def get_historical_performance_score(pattern_details: dict, db_connection) -> fl
         return 0.0  # En cas d'erreur, retourner un score neutre
 
 
+import numpy as np
+
 def calculate_mvrv_score(mvrv_series: pd.Series) -> pd.Series:
     """
-    Calcule un score basé sur le MVRV (Market Value to Realized Value).
-    Gère robustement les données manquantes. Un MVRV élevé suggère que le marché
-    est surévalué (signal baissier), tandis qu'un MVRV bas suggère une
-    sous-évaluation (signal haussier).
-
-    Args:
-        mvrv_series (pd.Series): Série temporelle des valeurs MVRV.
-
-    Returns:
-        pd.Series: Une série de scores normalisés entre 0 et 1.
+    Calcule un score basé sur le MVRV.
+    Gère robustement les données manquantes (NaN ou 0.0).
     """
-    # Remplir les NaN avec une valeur neutre (ex: 1.0) pour le calcul
-    mvrv_series_filled = mvrv_series.fillna(1.0)
+    # Remplacer les NaN et 0.0 par 1.0 (valeur neutre pour MVRV)
+    mvrv_filled = mvrv_series.replace(0.0, 1.0).fillna(1.0)
 
-    # Logique de scoring:
-    # MVRV > 3.0 -> Danger, score proche de 0.1 (baissier)
-    # MVRV < 1.0 -> Opportunité, score proche de 0.9 (haussier)
-    # Entre 1.0 et 3.0 -> Zone neutre, score autour de 0.5
-    score = np.where(mvrv_series_filled > 3.0, 0.1,
-                   np.where(mvrv_series_filled < 1.0, 0.9, 0.5))
+    # Logique de scoring (exemple)
+    # si MVRV > 3.0 (euphorie) -> score bas (0.1)
+    # si MVRV < 1.0 (capitulation) -> score haut (0.9)
+    # sinon -> score neutre (0.5)
+    score = np.where(mvrv_filled > 3.0, 0.1,
+            np.where(mvrv_filled < 1.0, 0.9, 0.5))
 
-    # S'assurer que les NaN d'origine retournent un score neutre (0.5)
-    score[mvrv_series.isna()] = 0.5
+    # Forcer le score neutre là où la donnée était absente
+    score[mvrv_series.isna() | (mvrv_series == 0.0)] = 0.5
 
     return pd.Series(score, index=mvrv_series.index)
 
-
 def calculate_exchange_netflow_score(netflow_series: pd.Series) -> pd.Series:
     """
-    Calcule un score basé sur le flux net des exchanges.
-    Gère robustement les données manquantes. Un netflow fortement négatif
-    (sorties massives) est haussier, tandis qu'un netflow positif (entrées)
-    est baissier.
-
-    Args:
-        netflow_series (pd.Series): Série temporelle des flux nets.
-
-    Returns:
-        pd.Series: Une série de scores normalisés.
+    Calcule un score basé sur les flux nets des exchanges.
+    Gère robustement les données manquantes (NaN ou 0.0).
     """
-    # Gérer les NaNs en retournant un score neutre
-    if netflow_series.isnull().all():
-        return pd.Series(0.5, index=netflow_series.index)
+    # Remplacer les NaN et 0.0 par une valeur neutre pour le calcul
+    netflow_filled = netflow_series.replace(0.0, np.nan).fillna(0)
 
-    # Remplir les NaN restants pour le calcul du Z-score
-    netflow_filled = netflow_series.fillna(0)
+    # Normaliser le netflow en utilisant une moyenne mobile du max absolu
+    # pour s'adapter aux changements de volatilité du marché.
+    rolling_max_abs = netflow_filled.abs().rolling(window=30, min_periods=1).max()
+    normalized_netflow = netflow_filled / (rolling_max_abs + 1e-9) # Ajout de 1e-9 pour éviter la division par zéro
 
-    # Utiliser un Z-score pour normaliser le netflow
-    mean = netflow_filled.rolling(window=30, min_periods=1).mean()
-    std = netflow_filled.rolling(window=30, min_periods=1).std().replace(0, np.nan).fillna(method='ffill')
+    # Convertir la valeur normalisée en score de 0 à 1 via une fonction sigmoïde.
+    # Un netflow négatif (sortie, haussier) doit donner un score > 0.5.
+    # Un netflow positif (entrée, baissier) doit donner un score < 0.5.
+    # La multiplication par 5 accentue la pente de la sigmoïde.
+    score = 1 / (1 + np.exp(normalized_netflow * 5))
 
-    z_score = (netflow_filled - mean) / std
-    z_score.fillna(0, inplace=True) # Remplacer les NaN du Z-score par 0
-
-    # Convertir le Z-score en score de 0 à 1 (fonction sigmoïde inversée)
-    # Un Z-score négatif (sortie) doit donner un score > 0.5 (haussier)
-    # Un Z-score positif (entrée) doit donner un score < 0.5 (baissier)
-    score = 1 / (1 + np.exp(z_score))
-
-    # S'assurer que les NaN d'origine retournent un score neutre (0.5)
-    score[netflow_series.isna()] = 0.5
+    # Forcer le score neutre là où la donnée était absente à l'origine
+    score[netflow_series.isna() | (netflow_series == 0.0)] = 0.5
 
     return pd.Series(score, index=netflow_series.index)
 
-
-def calculate_whale_activity_score(whale_activity_series: pd.Series) -> pd.Series:
+def calculate_whale_accumulation_score(whale_accumulation_series: pd.Series) -> pd.Series:
     """
-    Calcule un score basé sur l'activité des baleines (gros détenteurs).
-    Gère les données manquantes. Une augmentation significative de l'activité
-    des baleines peut signaler une volatilité à venir.
-
-    Args:
-        whale_activity_series (pd.Series): Série temporelle de l'activité des baleines.
-
-    Returns:
-        pd.Series: Une série de scores.
+    Calcule un score basé sur le delta d'accumulation des baleines.
+    Gère robustement les données manquantes (NaN ou 0.0).
     """
-    # Gérer les NaNs en retournant un score neutre
-    if whale_activity_series.isnull().all():
-        return pd.Series(0.5, index=whale_activity_series.index)
+    # Remplacer les NaN et 0.0 par une valeur neutre pour le calcul
+    accumulation_filled = whale_accumulation_series.replace(0.0, np.nan).fillna(0)
 
-    whale_activity_filled = whale_activity_series.fillna(method='ffill')
+    # Logique de scoring simple
+    # Accumulation positive -> score haussier (> 0.5)
+    # Accumulation négative -> score baissier (< 0.5)
+    # On peut utiliser une fonction sigmoïde pour borner le score
+    # et le centrer autour de 0.5. On normalise d'abord les données.
 
-    # Calculer le taux de changement pour détecter les pics d'activité
-    roc = whale_activity_filled.pct_change(periods=7).fillna(0)
+    # Normalisation simple pour amener les valeurs dans une plage gérable
+    normalized_accumulation = accumulation_filled / (accumulation_filled.abs().max() + 1e-9)
 
-    # Un ROC élevé (> 0.2) peut indiquer une accumulation (haussier)
-    # Un ROC très négatif (< -0.2) peut indiquer une distribution (baissier)
-    score = np.where(roc > 0.2, 0.8,
-                   np.where(roc < -0.2, 0.2, 0.5)) # Neutre sinon
+    score = 1 / (1 + np.exp(-normalized_accumulation * 5)) # Le facteur 5 accentue la courbe
 
-    # S'assurer que les NaN d'origine retournent un score neutre
-    score[whale_activity_series.isna()] = 0.5
+    # Forcer le score neutre là où la donnée était absente
+    score[whale_accumulation_series.isna() | (whale_accumulation_series == 0.0)] = 0.5
 
-    return pd.Series(score, index=whale_activity_series.index)
+    return pd.Series(score, index=whale_accumulation_series.index)
