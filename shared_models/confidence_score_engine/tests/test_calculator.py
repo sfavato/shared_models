@@ -1,82 +1,115 @@
-import pandas as pd
-import numpy as np
 import pytest
-from shared_models.confidence_score_engine.calculator import calculate_derivatives_score
+import pandas as pd
+from unittest.mock import patch, MagicMock
+from shared_models.confidence_score_engine.calculator import ConfidenceScoreCalculator
 
-# Helper function to create test data
-def create_test_data(oi_trend, fr_trend):
-    data = {
-        'timestamp': pd.to_datetime(pd.date_range(start='2023-01-01', periods=30, freq='h')),
-        'open_interest': np.linspace(1000, 1000 + oi_trend, 30),
-        'funding_rate': np.linspace(0.001, 0.001 + fr_trend, 30),
-        'cvd': np.random.rand(30)
-    }
-    return pd.DataFrame(data)
+@pytest.fixture
+def mock_gcs():
+    """Fixture to mock Google Cloud Storage client and blob."""
+    with patch('google.cloud.storage.Client') as mock_client:
+        mock_bucket = MagicMock()
+        mock_blob = MagicMock()
 
-def test_empty_dataframe():
-    """Test that an empty DataFrame returns a score of 0."""
-    df = pd.DataFrame()
-    assert calculate_derivatives_score(df) == 0
+        mock_client.return_value.bucket.return_value = mock_bucket
+        mock_bucket.blob.return_value = mock_blob
 
-def test_not_enough_data():
-    """Test that a DataFrame with insufficient data for a Z-score returns 0."""
-    df = create_test_data(100, 0.001)[:10]  # Less than the 24-period window
-    assert calculate_derivatives_score(df) == 0
+        yield mock_client, mock_blob
 
-def test_strong_bullish_signal():
-    """Test for a strong bullish signal: high OI z-score and very negative funding rate z-score."""
-    # To get a high OI z-score, we need a sharp increase at the end
-    oi_data = np.linspace(1000, 1100, 30)
-    oi_data[-1] = 1500 # Sharp increase to get z-score > 1
+@pytest.fixture
+def mock_joblib():
+    """Fixture to mock joblib.load."""
+    with patch('joblib.load') as mock_load:
+        mock_model = MagicMock()
+        mock_preprocessor = MagicMock()
 
-    # To get a very negative FR z-score, we need a sharp decrease at the end
-    fr_data = np.linspace(0.001, 0.00, 30)
-    fr_data[-1] = -0.05 # Sharp decrease to get z-score < -1.5
+        # Configure mocks to return a model and a preprocessor
+        mock_load.side_effect = [mock_preprocessor, mock_model]
 
-    data = {
-        'timestamp': pd.to_datetime(pd.date_range(start='2023-01-01', periods=30, freq='h')),
-        'open_interest': oi_data,
-        'funding_rate': fr_data,
-    }
-    df = pd.DataFrame(data)
-    # Expected score: +1 (OI) + 2 (FR) = 3
-    assert calculate_derivatives_score(df) == 3
+        # Mock the prediction logic
+        mock_model.predict_proba.return_value = [[0.2, 0.8]] # Example probability
 
-def test_strong_bearish_signal():
-    """Test for a strong bearish signal: very positive funding rate z-score."""
-    # To get a very positive FR z-score, we need a sharp increase at the end
-    fr_data = np.linspace(0.001, 0.002, 30)
-    fr_data[-1] = 0.05 # Sharp increase to get z-score > 1.5
+        # Mock the transform logic
+        mock_preprocessor.transform.return_value = pd.DataFrame({'feature': [1]})
 
-    data = {
-        'timestamp': pd.to_datetime(pd.date_range(start='2023-01-01', periods=30, freq='h')),
-        'open_interest': np.linspace(1000, 1000, 30), # Truly stable OI
-        'funding_rate': fr_data,
-    }
-    df = pd.DataFrame(data)
-    # Expected score: -2 (FR)
-    assert calculate_derivatives_score(df) == -2
+        yield mock_load, mock_model, mock_preprocessor
 
-def test_bullish_oi_only():
-    """Test for a bullish signal from Open Interest only."""
-    oi_data = np.linspace(1000, 1100, 30)
-    oi_data[-1] = 1500 # Sharp increase
+def test_load_models_success(mock_gcs, mock_joblib):
+    """Test successful loading of models from GCS."""
+    mock_client, mock_blob = mock_gcs
+    mock_load, _, _ = mock_joblib
 
-    data = {
-        'timestamp': pd.to_datetime(pd.date_range(start='2023-01-01', periods=30, freq='h')),
-        'open_interest': oi_data,
-        'funding_rate': np.linspace(0.001, 0.001, 30), # Stable funding
-    }
-    df = pd.DataFrame(data)
-    # Expected score: +1 (OI)
-    assert calculate_derivatives_score(df) == 1
+    calculator = ConfidenceScoreCalculator()
+    assert calculator.load_models() is True
+    assert calculator.model is not None
+    assert calculator.preprocessor is not None
+    mock_client.return_value.bucket.assert_called_with("adept-coda-420809.appspot.com")
+    assert mock_blob.download_to_file.call_count == 2
+    assert mock_load.call_count == 2
 
-def test_neutral_signal():
-    """Test for a neutral signal where no thresholds are met."""
-    data = {
-        'timestamp': pd.to_datetime(pd.date_range(start='2023-01-01', periods=30, freq='h')),
-        'open_interest': np.linspace(1000, 1000, 30), # Truly stable OI
-        'funding_rate': np.linspace(0.001, 0.001, 30), # Stable funding
-    }
-    df = pd.DataFrame(data)
-    assert calculate_derivatives_score(df) == 0
+def test_load_models_failure(mock_gcs):
+    """Test failure of loading models from GCS."""
+    mock_client, mock_blob = mock_gcs
+    mock_blob.download_to_file.side_effect = Exception("GCS error")
+
+    calculator = ConfidenceScoreCalculator()
+    assert calculator.load_models() is False
+    assert calculator.model is None
+    assert calculator.preprocessor is None
+
+def test_calculate_score_success(mock_gcs, mock_joblib):
+    """Test successful score calculation."""
+    live_features = {'open_interest': 12345, 'funding_rate': 0.01, 'long_short_ratio': 1.5}
+
+    calculator = ConfidenceScoreCalculator()
+
+    # Pre-load models
+    calculator.load_models()
+
+    score = calculator.calculate_score(live_features)
+
+    assert score == 0.8
+
+    _, mock_model, mock_preprocessor = mock_joblib
+
+    mock_preprocessor.transform.assert_called_once()
+    mock_model.predict_proba.assert_called_once()
+
+def test_calculate_score_models_not_loaded(mock_gcs, mock_joblib):
+    """Test that models are loaded if not already present."""
+    live_features = {'open_interest': 12345, 'funding_rate': 0.01, 'long_short_ratio': 1.5}
+
+    calculator = ConfidenceScoreCalculator()
+
+    # Do not pre-load models
+    score = calculator.calculate_score(live_features)
+
+    assert score == 0.8
+    assert calculator.model is not None
+    assert calculator.preprocessor is not None
+
+def test_calculate_score_loading_fails(mock_gcs):
+    """Test score calculation when model loading fails."""
+    mock_client, mock_blob = mock_gcs
+    mock_blob.download_to_file.side_effect = Exception("GCS error")
+
+    live_features = {'open_interest': 12345, 'funding_rate': 0.01, 'long_short_ratio': 1.5}
+
+    calculator = ConfidenceScoreCalculator()
+
+    score = calculator.calculate_score(live_features)
+
+    assert score == 0.0
+
+def test_calculate_score_prediction_fails(mock_gcs, mock_joblib):
+    """Test score calculation when prediction fails."""
+    _, mock_model, _ = mock_joblib
+    mock_model.predict_proba.side_effect = Exception("Prediction error")
+
+    live_features = {'open_interest': 12345, 'funding_rate': 0.01, 'long_short_ratio': 1.5}
+
+    calculator = ConfidenceScoreCalculator()
+    calculator.load_models()
+
+    score = calculator.calculate_score(live_features)
+
+    assert score == 0.0
