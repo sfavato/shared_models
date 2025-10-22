@@ -296,3 +296,17 @@ def calculate_whale_accumulation_score(whale_accumulation_series: pd.Series) -> 
     score[whale_accumulation_series.isna() | (whale_accumulation_series == 0.0)] = 0.5
 
     return pd.Series(score, index=whale_accumulation_series.index)
+
+def calculate_market_regime_features(db_engine, symbol, timeframe):
+    """
+    Calcule le régime de marché.
+    Pour la Phase 1, cette fonction retourne un score de régime statique.
+    """
+    return {'regime_score': 0.5}
+
+def calculate_onchain_features(db_engine, symbol, timeframe):
+    """
+    Calcule les features on-chain.
+    Pour la Phase 1, cette fonction retourne un score on-chain statique.
+    """
+    return {'cvd_divergence_score': -0.2}
