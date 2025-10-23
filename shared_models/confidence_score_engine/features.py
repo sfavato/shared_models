@@ -121,7 +121,57 @@ def trapped_trader_score(price_close: pd.Series, long_liquidations: pd.Series, s
     return final_score.rolling(window=3).mean()
 
 
-def calculate_geometric_purity_score(pattern_details: dict) -> float:
+def _calculate_ratios_from_points(points: dict) -> dict:
+    """
+    Calcule les ratios de Fibonacci à partir des points d'un pattern harmonique.
+
+    Args:
+        points (dict): Un dictionnaire de prix pour les points X, A, B, C, D.
+                       Ex: {'X': 100, 'A': 110, 'B': 105, 'C': 108, 'D': 102}
+
+    Returns:
+        dict: Un dictionnaire contenant les ratios calculés (B, C, D, XA).
+    """
+    # Extraction des prix
+    p_x = points.get('X')
+    p_a = points.get('A')
+    p_b = points.get('B')
+    p_c = points.get('C')
+    p_d = points.get('D')
+
+    # Vérification que tous les points nécessaires sont présents
+    if not all([p_x, p_a, p_b, p_c, p_d]):
+        return {} # Retourner un dictionnaire vide si un point manque
+
+    # Calcul des longueurs des segments
+    xa = abs(p_a - p_x)
+    ab = abs(p_b - p_a)
+    bc = abs(p_c - p_b)
+    cd = abs(p_d - p_c)
+    ad = abs(p_d - p_a)
+
+    if xa == 0 or ab == 0 or bc == 0:
+        return {} # Éviter la division par zéro
+
+    # Calcul des ratios de retracement et de projection
+    # Point B: Retracement de XA
+    ratio_b = ab / xa
+    # Point C: Retracement de AB
+    ratio_c = bc / ab
+    # Point D: Retracement de BC
+    ratio_d_bc = cd / bc
+    # Point D: Retracement de XA
+    ratio_d_xa = ad / xa
+
+    return {
+        'B': ratio_b,
+        'C': ratio_c,
+        'D': ratio_d_bc,
+        'XA': ratio_d_xa
+    }
+
+
+def calculate_geometric_purity_score(pattern_name: str, pattern_points: dict) -> float:
     """
     Calcule un score de "pureté géométrique" pour un pattern harmonique.
 
@@ -129,9 +179,8 @@ def calculate_geometric_purity_score(pattern_details: dict) -> float:
     aux ratios de Fibonacci idéaux.
 
     Args:
-        pattern_details (dict): Un dictionnaire contenant:
-            - 'name' (str): Le nom du pattern (ex: 'Gartley').
-            - 'ratios' (dict): Un dictionnaire des ratios mesurés (ex: {'B': 0.618, 'C': 0.786, ...}).
+        pattern_name (str): Le nom du pattern (ex: 'Gartley').
+        pattern_points (dict): Un dictionnaire des prix pour les points X, A, B, C, D.
 
     Returns:
         float: Un score normalisé entre 0 et 10, où 10 est un pattern parfait.
@@ -143,31 +192,35 @@ def calculate_geometric_purity_score(pattern_details: dict) -> float:
         'Crab': {'B': 0.618, 'C': 0.886, 'D': 1.618, 'XA': 1.618}
     }
 
-    pattern_name = pattern_details.get('name')
-    actual_ratios = pattern_details.get('ratios', {})
-
     if pattern_name not in IDEAL_RATIOS:
         return 0.0  # Pattern non reconnu
 
+    # ÉTAPE 1: Calculer les ratios réels à partir des points de prix.
+    actual_ratios = _calculate_ratios_from_points(pattern_points)
+    if not actual_ratios:
+        return 0.0 # Retourner 0 si les ratios n'ont pas pu être calculés
+
+    # ÉTAPE 2: Comparer les ratios réels aux ratios idéaux.
     ideal = IDEAL_RATIOS[pattern_name]
     errors = []
 
     for point, ideal_ratio in ideal.items():
         actual_ratio = actual_ratios.get(point)
-        if actual_ratio is not None:
-            error = (actual_ratio - ideal_ratio) ** 2
-            errors.append(error)
+        if actual_ratio is None:
+            return 0.0 # Si un ratio est manquant, le score est de 0
+        # Calcul de l'erreur quadratique
+        error = (actual_ratio - ideal_ratio) ** 2
+        errors.append(error)
 
     if not errors:
         return 0.0
 
+    # ÉTAPE 3: Calculer le score final basé sur l'erreur.
     # Calcul de l'erreur quadratique moyenne (MSE)
     mse = sum(errors) / len(errors)
 
-    # Normalisation du score: 1 / (1 + MSE) pour borner entre 0 et 1, puis mise à l'échelle sur 10.
-    # Un MSE de 0 donne un score de 10 (parfait).
-    # Un MSE de 0.1 donne un score de ~9.09.
-    # Un MSE de 1.0 donne un score de 5.0.
+    # Normalisation du score: 1 / (1 + MSE) pour le borner entre 0 et 1,
+    # puis mise à l'échelle de 0 à 10.
     normalized_score = 1 / (1 + mse)
     final_score = normalized_score * 10
 
