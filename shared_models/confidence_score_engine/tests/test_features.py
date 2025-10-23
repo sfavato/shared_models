@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 import numpy as np
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 from shared_models.confidence_score_engine.features import (
     calculate_divergence_score,
     oi_weighted_funding_momentum,
@@ -94,31 +94,32 @@ def test_trapped_trader_score_liquidation_spike(sample_data):
 
 
 # Tests for calculate_geometric_purity_score
-def test_perfect_gartley_purity():
+@patch('shared_models.confidence_score_engine.features._calculate_ratios_from_points')
+def test_perfect_gartley_purity(mock_calculate_ratios):
     """Test a geometrically perfect Gartley pattern returns a score of 10."""
-    pattern = {
-        'name': 'Gartley',
-        'ratios': {'B': 0.618, 'C': 0.786, 'D': 0.786, 'XA': 0.786}
-    }
-    assert calculate_geometric_purity_score(pattern) == pytest.approx(10.0)
+    mock_calculate_ratios.return_value = {'B': 0.618, 'C': 0.786, 'D': 0.786, 'XA': 0.786}
+    points = {'X': 100, 'A': 110, 'B': 103.82, 'C': 108.7, 'D': 102.14}
+    assert calculate_geometric_purity_score('Gartley', points) == pytest.approx(10.0)
 
-def test_imperfect_bat_purity():
+@patch('shared_models.confidence_score_engine.features._calculate_ratios_from_points')
+def test_imperfect_bat_purity(mock_calculate_ratios):
     """Test an imperfect Bat pattern returns a score less than 10."""
-    pattern = {
-        'name': 'Bat',
-        'ratios': {'B': 0.55, 'C': 0.80, 'D': 0.90, 'XA': 0.85} # Deviations
-    }
-    assert calculate_geometric_purity_score(pattern) < 10.0
+    mock_calculate_ratios.return_value = {'B': 0.55, 'C': 0.80, 'D': 0.90, 'XA': 0.85}
+    points = {'X': 100, 'A': 110, 'B': 105, 'C': 108, 'D': 102}
+    assert calculate_geometric_purity_score('Bat', points) < 10.0
 
 def test_unknown_pattern_purity():
     """Test that an unrecognized pattern returns a score of 0."""
-    pattern = {'name': 'Unknown', 'ratios': {'B': 0.5}}
-    assert calculate_geometric_purity_score(pattern) == 0.0
+    points = {'X': 100, 'A': 110, 'B': 105, 'C': 108, 'D': 102}
+    assert calculate_geometric_purity_score('Unknown', points) == 0.0
 
-def test_missing_ratios_purity():
-    """Test that a pattern with a single perfect ratio still yields a perfect score."""
-    pattern = {'name': 'Gartley', 'ratios': {'B': 0.618}}
-    assert calculate_geometric_purity_score(pattern) == pytest.approx(10.0)
+@patch('shared_models.confidence_score_engine.features._calculate_ratios_from_points')
+def test_missing_ratios_purity(mock_calculate_ratios):
+    """Test that missing ratios result in a score of 0."""
+    mock_calculate_ratios.return_value = {'B': 0.618} # Only one ratio, others are missing
+    points = {'X': 100, 'A': 110, 'B': 103.82, 'C': 108.7, 'D': 102.14}
+    score = calculate_geometric_purity_score('Gartley', points)
+    assert score == 0.0
 
 # Tests for get_historical_performance_score
 @pytest.fixture
