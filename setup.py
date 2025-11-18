@@ -9,5 +9,5 @@ setup(
     description="Shared model classes for my harmonic project usage",
     author="Vincent Schmitt",
     author_email="vsc77420@gmail.com",
-    url="https://github.com/yourusername/shared-models",  # Repository URL
+    url="https://github.com/sfavato/shared-models",  # Repository URL
 )
