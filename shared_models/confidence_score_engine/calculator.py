@@ -9,7 +9,23 @@ from io import BytesIO
 MODEL_BUCKET_NAME = "adept-coda-420809.appspot.com"
 MODEL_FILE_NAME = "confidence_model.pkl"
 PREPROCESSOR_FILE_NAME = "preprocessor.pkl"
-EXPECTED_FEATURES = ['open_interest', 'funding_rate', 'long_short_ratio']
+EXPECTED_FEATURES = [
+    'open_interest', 
+    'funding_rate', 
+    'long_short_ratio',
+    'cvd',
+    'btc_dominance',
+    'btc_trend_ma_200',
+    'mvrv_score',
+    'netflow_score',
+    'trapped_trader_score',
+    'divergence_score',
+    'oi_weighted_funding_momentum',
+    'price_vs_poc',
+    'price_vs_vah',
+    'price_vs_val',
+    'is_in_value_area'
+]
 
 logger = logging.getLogger(__name__)
 
