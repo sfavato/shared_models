@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import os
 from .features import (
     calculate_divergence_score,
     oi_weighted_funding_momentum,
@@ -12,7 +13,8 @@ from .pipeline import PreprocessingPipeline
 
 def generate_confidence_scores(
     merged_df: pd.DataFrame,
-    lookback_period: int = 20
+    lookback_period: int = 20,
+    pipeline_path: str = None
 ) -> np.ndarray:
     """
     Orchestre le calcul complet des scores de confiance à partir d'un DataFrame consolidé.
@@ -68,8 +70,13 @@ def generate_confidence_scores(
     if features_df.empty or features_df.isnull().values.any():
         return np.array([])
 
-    # Instantiate and use the preprocessing pipeline
-    pipeline = PreprocessingPipeline()
-    processed_features_df = pipeline.fit_transform(features_df)
+    # CHARGEMENT DU PIPELINE ENTRAÎNÉ
+    if pipeline_path and os.path.exists(pipeline_path):
+        pipeline = PreprocessingPipeline.load(pipeline_path)
+        # UTILISER TRANSFORM, PAS FIT_TRANSFORM
+        processed_features_df = pipeline.transform(features_df)
+    else:
+        # Fallback ou erreur
+        return np.array([])
 
     return processed_features_df.to_numpy()
