@@ -1,5 +1,6 @@
 import pandas as pd
 import joblib
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import QuantileTransformer
 from sklearn.decomposition import PCA
 from sklearn.pipeline import Pipeline
@@ -48,6 +49,18 @@ def apply_pca(data: pd.DataFrame, variance_threshold: float = 0.95) -> (pd.DataF
     principal_components.columns = [f"PC_{i+1}" for i in range(principal_components.shape[1])]
     return principal_components, pca
 
+
+class DtypeCoercer(BaseEstimator, TransformerMixin):
+    """
+    A custom transformer to coerce all columns in a DataFrame to float64.
+    """
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X, y=None):
+        return X.astype('float64')
+
+
 class PreprocessingPipeline:
     """
     A reusable preprocessing pipeline that chains QuantileTransformer and PCA.
@@ -57,6 +70,10 @@ class PreprocessingPipeline:
     """
     def __init__(self, n_quantiles: int = 1000, variance_threshold: float = 0.95, random_state: int = 42):
         self.pipeline = Pipeline([
+            (
+                'dtype_coercer',
+                DtypeCoercer()
+            ),
             (
                 'quantile_transformer',
                 QuantileTransformer(
