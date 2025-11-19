@@ -73,15 +73,17 @@ class ConfidenceScoreCalculator:
             logger.error(f"Échec critique du chargement des modèles: {e}", exc_info=True)
             return False
 
-    def calculate_score(self, live_features: dict, purity_score: float = 5.0) -> float:
+    def calculate_score(self, live_features: dict, geometric_purity: float = 0.5, market_confluence_score: float = 0.5, historical_win_rate: float = 0.5) -> float:
         """
         Calcule un Score Hybride pondéré.
 
-        Formule : Score Final = (Probabilité ML * 70%) + (Pureté Géométrique * 30%)
+        Formule : Score_Final = (Model_ML_Prob * 0.40) + (Confluence * 0.30) + (Purity * 0.15) + (History * 0.15)
 
         Args:
             live_features (dict): Features pour le modèle ML (OI, Funding, etc.)
-            purity_score (float): Score de pureté technique sur 10 (défaut: 5.0)
+            geometric_purity (float): Score de pureté géométrique (0.0 - 1.0)
+            market_confluence_score (float): Score de confluence de marché (0.0 - 1.0)
+            historical_win_rate (float): Taux de victoire historique (0.0 - 1.0)
         """
         # --- 1. Obtenir le score ML (Probabilité 0.0 - 1.0) ---
         ml_probability = 0.0
@@ -89,9 +91,9 @@ class ConfidenceScoreCalculator:
         if not self.model or not self.preprocessor:
             logger.warning("Modèles non chargés. Tentative de chargement...")
             if not self.load_models():
-                logger.error("Calcul ML impossible : Modèles non disponibles. Fallback sur Pureté.")
-                # Si le ML échoue, on se base uniquement sur la pureté normalisée (0-1)
-                return purity_score / 10.0
+                logger.error("Calcul ML impossible : Modèles non disponibles. Fallback sur les autres scores.")
+                # Si le ML échoue, on met sa probabilité à 0.0 pour ne pas influencer le score
+                ml_probability = 0.0
 
         try:
             df = pd.DataFrame([live_features], columns=EXPECTED_FEATURES)
@@ -101,23 +103,23 @@ class ConfidenceScoreCalculator:
             logger.info(f"Score ML Brut : {ml_probability:.4f}")
 
         except Exception as e:
-            logger.error(f"Erreur calcul ML : {e}. Fallback sur Pureté.", exc_info=True)
-            return purity_score / 10.0
+            logger.error(f"Erreur calcul ML : {e}. Fallback sur les autres scores.", exc_info=True)
+            ml_probability = 0.0
 
-        # --- 2. Normaliser la Pureté (0-10 -> 0.0-1.0) ---
-        # On s'assure que le score est borné entre 0 et 10 avant de diviser
-        clean_purity = max(0.0, min(10.0, float(purity_score)))
-        purity_factor = clean_purity / 10.0
+        # --- 2. Calculer le Score Composite ---
+        WEIGHT_ML = 0.40
+        WEIGHT_CONFLUENCE = 0.30
+        WEIGHT_PURITY = 0.15
+        WEIGHT_HISTORY = 0.15
 
-        # --- 3. Calculer le Score Composite ---
-        # Poids : 70% ML (Context), 30% Technique (Geometry)
-        # Ce réglage permet au ML de rester dominant tout en laissant la qualité du pattern
-        # faire la différence sur les cas limites (ex: ML à 0.45 mais Pureté à 9/10 -> Score final ~0.58)
-        WEIGHT_ML = 0.7
-        WEIGHT_PURITY = 0.3
+        final_score_raw = (ml_probability * WEIGHT_ML) + \
+                          (market_confluence_score * WEIGHT_CONFLUENCE) + \
+                          (geometric_purity * WEIGHT_PURITY) + \
+                          (historical_win_rate * WEIGHT_HISTORY)
 
-        final_score = (ml_probability * WEIGHT_ML) + (purity_factor * WEIGHT_PURITY)
+        # --- 3. Normaliser le score final sur 10 ---
+        final_score_normalized = final_score_raw * 10
 
-        logger.info(f"Score Hybride Calculé : {final_score:.4f} (ML: {ml_probability:.2f}, Pureté: {clean_purity:.1f})")
+        logger.info(f"Score Final Calculé : {final_score_normalized:.2f}/10 (ML: {ml_probability:.2f}, Confluence: {market_confluence_score:.2f}, Pureté: {geometric_purity:.2f}, Historique: {historical_win_rate:.2f})")
 
-        return final_score
+        return final_score_normalized

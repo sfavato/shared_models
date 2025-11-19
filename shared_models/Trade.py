@@ -17,7 +17,8 @@ class Trade:
                  PostLimitSlightTouch=False, PreTrue1SlightTouch=False, PostTrue1SlightTouch=False, 
                  PreTrue2SlightTouch=False, PostTrue2SlightTouch=False, confidence=3, invalidation=False, 
                  has_3d_close_above=False, open_3min=0, close_3min=0, 
-                 high_3min=0, low_3min=0, open_4h=0, close_4h=0, high_4h=0, low_4h=0):
+                 high_3min=0, low_3min=0, open_4h=0, close_4h=0, high_4h=0, low_4h=0,
+                 purity_score=0.0, confluence_score=0.0, historical_win_rate=0.0):
         self.id = id
         self.owner = owner
         self.nom = nom
@@ -65,6 +66,9 @@ class Trade:
         self.confidence = confidence
         self.Invalidation = invalidation
         self.has_3d_close_above = has_3d_close_above
+        self.purity_score = purity_score
+        self.confluence_score = confluence_score
+        self.historical_win_rate = historical_win_rate
         
         
 
@@ -170,7 +174,9 @@ class TradeManager:
                 confidence=ligne.get('Confidence', 3),
                 invalidation=ligne.get('Invalidation') == 'True',
                 has_3d_close_above=ligne.get('Has3dClosedAbove') == 'True',
-
+                purity_score=float(ligne.get('purity_score', 0.0)),
+                confluence_score=float(ligne.get('confluence_score', 0.0)),
+                historical_win_rate=float(ligne.get('historical_win_rate', 0.0)),
             )
             indices.append(indice)
         return indices
@@ -183,7 +189,8 @@ class TradeManager:
 
         entetes = ['Id', 'Owner', 'Nom', 'Direction', 'Harmonic', 'Prix_seuil', 'Prix_limit',
                 'True1', 'True2', 'True1_triggered', 'True2_triggered', 'Comment', 'Prix_courant', 'Status', 'Link', 'Pourcentage', 'X', 'A', 'B', 'C', 'D', 'OldStatus', 'Has4H', 'Has1H', 'HasSL', 'HasTP1', 'HasTP2', 'HasTP3', 'HasTP4', 'HasTP5', 'TrailingSL', 'WantRetest', 'Touched_entry', 'True3', 'True4', 'Tf',
-                'PreEntrySlightTouch', 'PostEntrySlightTouch', 'PreLimitSlightTouch', 'PostLimitSlightTouch', 'PreTrue1SlightTouch', 'PostTrue1SlightTouch', 'PreTrue2SlightTouch', 'PostTrue2SlightTouch', 'Confidence', 'Invalidation', 'Has3dClosedAbove']
+                'PreEntrySlightTouch', 'PostEntrySlightTouch', 'PreLimitSlightTouch', 'PostLimitSlightTouch', 'PreTrue1SlightTouch', 'PostTrue1SlightTouch', 'PreTrue2SlightTouch', 'PostTrue2SlightTouch', 'Confidence', 'Invalidation', 'Has3dClosedAbove',
+                'purity_score', 'confluence_score', 'historical_win_rate']
         lignes = [entetes]
         for indice in indices:
             lignes.append([
@@ -234,7 +241,9 @@ class TradeManager:
                 indice.confidence,
                 indice.Invalidation,
                 indice.has_3d_close_above,
-
+                indice.purity_score,
+                indice.confluence_score,
+                indice.historical_win_rate,
             ])
 
         content = "\n".join([",".join(map(str, ligne)) for ligne in lignes])
@@ -307,7 +316,10 @@ class TradeManager:
                         PostTrue1SlightTouch=ligne.get('PostTrue1SlightTouch') == 'False',
                         PreTrue2SlightTouch=ligne.get('PreTrue2SlightTouch') == 'False',
                         PostTrue2SlightTouch=ligne.get('PostTrue2SlightTouch') == 'False',
-                        confidence=ligne.get('Confidence',3)
+                        confidence=ligne.get('Confidence',3),
+                        purity_score=float(ligne.get('purity_score', 0.0)),
+                        confluence_score=float(ligne.get('confluence_score', 0.0)),
+                        historical_win_rate=float(ligne.get('historical_win_rate', 0.0)),
                     )
                     trades.append(trade)
         except Exception as e:
