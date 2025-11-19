@@ -98,7 +98,8 @@ def test_calculate_score_loads_models_automatically(mock_gcs_and_pickleable_mode
     live_features = {'open_interest': 100, 'funding_rate': 0.01, 'long_short_ratio': 1.2}
     score = calculator.calculate_score(live_features)
 
-    assert score == 0.8  # Expected probability of class 1
+    # Expected score = (0.8 * 0.7) + (5.0/10 * 0.3) = 0.56 + 0.15 = 0.71
+    assert score == pytest.approx(0.71)
     assert calculator.model is not None  # Models should now be loaded
     assert calculator.preprocessor is not None
 
@@ -111,11 +112,24 @@ def test_calculate_score_with_preloaded_models(mock_gcs_and_pickleable_models):
     live_features = {'open_interest': 100, 'funding_rate': 0.01, 'long_short_ratio': 1.2}
     score = calculator.calculate_score(live_features)
 
-    assert score == 0.8
+    # Expected score = (0.8 * 0.7) + (5.0/10 * 0.3) = 0.71
+    assert score == pytest.approx(0.71)
 
 
-def test_calculate_score_returns_zero_on_error(mock_gcs_and_pickleable_models):
-    """Test that `calculate_score` returns 0.0 if an error occurs during prediction."""
+def test_calculate_score_with_custom_purity_score(mock_gcs_and_pickleable_models):
+    """Test the hybrid score calculation with a custom purity score."""
+    calculator = ConfidenceScoreCalculator()
+    calculator.load_models()
+
+    live_features = {'open_interest': 100, 'funding_rate': 0.01, 'long_short_ratio': 1.2}
+    # Expected score = (0.8 * 0.7) + (9.0/10 * 0.3) = 0.56 + 0.27 = 0.83
+    score = calculator.calculate_score(live_features, purity_score=9.0)
+
+    assert score == pytest.approx(0.83)
+
+
+def test_calculate_score_returns_fallback_on_error(mock_gcs_and_pickleable_models):
+    """Test `calculate_score` returns a fallback score based on purity if an error occurs."""
     with patch('joblib.load') as mock_joblib_load:
         # Simulate an error during model loading/deserialization
         mock_joblib_load.side_effect = Exception("Deserialization failed")
@@ -123,6 +137,7 @@ def test_calculate_score_returns_zero_on_error(mock_gcs_and_pickleable_models):
         calculator = ConfidenceScoreCalculator()
 
         live_features = {'open_interest': 100, 'funding_rate': 0.01, 'long_short_ratio': 1.2}
-        score = calculator.calculate_score(live_features)
+        # Fallback should be purity_score / 10.
+        score = calculator.calculate_score(live_features, purity_score=7.0)
 
-        assert score == 0.0
+        assert score == 0.7

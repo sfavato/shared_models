@@ -171,60 +171,68 @@ def _calculate_ratios_from_points(points: dict) -> dict:
     }
 
 
-def calculate_geometric_purity_score(pattern_name: str, pattern_points: dict) -> float:
+def calculate_geometric_purity_score(pattern_details: dict, pattern_config: dict = None) -> float:
     """
-    Calcule un score de "pureté géométrique" pour un pattern harmonique.
+    Calcule un score de pureté dynamique (1-10) adapté à tout type de pattern.
 
-    Le score est basé sur la proximité des ratios réels du pattern par rapport
-    aux ratios de Fibonacci idéaux.
-
-    Args:
-        pattern_name (str): Le nom du pattern (ex: 'Gartley').
-        pattern_points (dict): Un dictionnaire des prix pour les points X, A, B, C, D.
-
-    Returns:
-        float: Un score normalisé entre 0 et 10, où 10 est un pattern parfait.
+    Si 'pattern_config' est fourni, utilise ses seuils spécifiques.
+    Sinon, tente d'utiliser un fallback (moins précis) ou retourne un score neutre.
     """
-    IDEAL_RATIOS = {
-        'Gartley': {'B': 0.618, 'C': 0.786, 'D': 0.786, 'XA': 0.786},
-        'Butterfly': {'B': 0.786, 'C': 0.886, 'D': 1.272, 'XA': 1.272},
-        'Bat': {'B': 0.5, 'C': 0.886, 'D': 0.886, 'XA': 0.886},
-        'Crab': {'B': 0.618, 'C': 0.886, 'D': 1.618, 'XA': 1.618}
-    }
+    actual_ratios = pattern_details.get('ratios', {})
 
-    if pattern_name not in IDEAL_RATIOS:
-        return 0.0  # Pattern non reconnu
+    # 1. Définir les ratios idéaux basés sur la configuration fournie (Source de Vérité)
+    # On calcule le milieu de la plage [Min, Max] comme l'idéal.
+    ideal_ratios = {}
 
-    # ÉTAPE 1: Calculer les ratios réels à partir des points de prix.
-    actual_ratios = _calculate_ratios_from_points(pattern_points)
-    if not actual_ratios:
-        return 0.0 # Retourner 0 si les ratios n'ont pas pu être calculés
+    if pattern_config:
+        # Extraction dynamique pour tout pattern (Gartley, Shark, Cypher, etc.)
+        if 'XBmin' in pattern_config and 'XBmax' in pattern_config:
+            ideal_ratios['B'] = (pattern_config['XBmin'] + pattern_config['XBmax']) / 2
 
-    # ÉTAPE 2: Comparer les ratios réels aux ratios idéaux.
-    ideal = IDEAL_RATIOS[pattern_name]
+        if 'ACmin' in pattern_config and 'ACmax' in pattern_config:
+            ideal_ratios['C'] = (pattern_config['ACmin'] + pattern_config['ACmax']) / 2
+
+        if 'XDmin' in pattern_config and 'XDmax' in pattern_config:
+            ideal_ratios['D'] = (pattern_config['XDmin'] + pattern_config['XDmax']) / 2
+
+    elif 'name' in pattern_details:
+        # Fallback hardcodé (Legacy) si la config n'est pas passée
+        # À garder temporairement pour la compatibilité ascendante
+        LEGACY_DEFAULTS = {
+            'Gartley': {'B': 0.618, 'C': 0.786, 'D': 0.786},
+            'Bat': {'B': 0.5, 'C': 0.886, 'D': 0.886},
+            'Butterfly': {'B': 0.786, 'C': 0.886, 'D': 1.272},
+            'Crab': {'B': 0.618, 'C': 0.886, 'D': 1.618}
+        }
+        ideal_ratios = LEGACY_DEFAULTS.get(pattern_details['name'], {})
+
+    if not ideal_ratios:
+        return 5.0  # Score neutre par défaut si pattern inconnu ou config manquante
+
+    # 2. Calcul de l'erreur
     errors = []
+    for point, ideal_val in ideal_ratios.items():
+        # Mappage des clés: dans harmofinder, les ratios sont souvent 'XB', 'AC', 'XD'
+        # Mais pattern_details peut utiliser 'B', 'C', 'D'. On normalise.
+        actual = None
+        if point == 'B': actual = actual_ratios.get('XB') or actual_ratios.get('B')
+        if point == 'C': actual = actual_ratios.get('AC') or actual_ratios.get('C')
+        if point == 'D': actual = actual_ratios.get('XD') or actual_ratios.get('D')
 
-    for point, ideal_ratio in ideal.items():
-        actual_ratio = actual_ratios.get(point)
-        if actual_ratio is None:
-            return 0.0 # Si un ratio est manquant, le score est de 0
-        # Calcul de l'erreur quadratique
-        error = (actual_ratio - ideal_ratio) ** 2
-        errors.append(error)
+        if actual is not None:
+            # Erreur quadratique pondérée (on punit plus les gros écarts)
+            errors.append((float(actual) - float(ideal_val)) ** 2)
 
     if not errors:
-        return 0.0
+        return 5.0
 
-    # ÉTAPE 3: Calculer le score final basé sur l'erreur.
-    # Calcul de l'erreur quadratique moyenne (MSE)
     mse = sum(errors) / len(errors)
 
-    # Normalisation du score: 1 / (1 + MSE) pour le borner entre 0 et 1,
-    # puis mise à l'échelle de 0 à 10.
-    normalized_score = 1 / (1 + mse)
-    final_score = normalized_score * 10
+    # 3. Normalisation : Un MSE de 0 donne 10. Un MSE élevé tend vers 0.
+    # La formule 1 / (1 + 100*mse) est plus sensible pour les petits écarts de ratios
+    normalized_score = 1 / (1 + 100 * mse)
 
-    return final_score
+    return round(normalized_score * 10, 2)
 
 
 def get_historical_performance_score(pattern_details: dict, db_connection) -> float:
