@@ -73,23 +73,51 @@ class ConfidenceScoreCalculator:
             logger.error(f"Échec critique du chargement des modèles: {e}", exc_info=True)
             return False
 
-    def calculate_score(self, live_features: dict) -> float:
+    def calculate_score(self, live_features: dict, purity_score: float = 5.0) -> float:
+        """
+        Calcule un Score Hybride pondéré.
+
+        Formule : Score Final = (Probabilité ML * 70%) + (Pureté Géométrique * 30%)
+
+        Args:
+            live_features (dict): Features pour le modèle ML (OI, Funding, etc.)
+            purity_score (float): Score de pureté technique sur 10 (défaut: 5.0)
+        """
+        # --- 1. Obtenir le score ML (Probabilité 0.0 - 1.0) ---
+        ml_probability = 0.0
+
         if not self.model or not self.preprocessor:
             logger.warning("Modèles non chargés. Tentative de chargement...")
             if not self.load_models():
-                return 0.0
+                logger.error("Calcul ML impossible : Modèles non disponibles. Fallback sur Pureté.")
+                # Si le ML échoue, on se base uniquement sur la pureté normalisée (0-1)
+                return purity_score / 10.0
 
         try:
-            # Création du DataFrame avec les features dans l'ordre exact
             df = pd.DataFrame([live_features], columns=EXPECTED_FEATURES)
-
-            # Transformation et Prédiction
             data_transformed = self.preprocessor.transform(df)
             proba = self.model.predict_proba(data_transformed)
-
-            # Retourne la probabilité de la classe 1 (Trade Gagnant)
-            return float(proba[0][1])
+            ml_probability = float(proba[0][1])
+            logger.info(f"Score ML Brut : {ml_probability:.4f}")
 
         except Exception as e:
-            logger.error(f"Erreur calcul score ML: {e}", exc_info=True)
-            return 0.0
+            logger.error(f"Erreur calcul ML : {e}. Fallback sur Pureté.", exc_info=True)
+            return purity_score / 10.0
+
+        # --- 2. Normaliser la Pureté (0-10 -> 0.0-1.0) ---
+        # On s'assure que le score est borné entre 0 et 10 avant de diviser
+        clean_purity = max(0.0, min(10.0, float(purity_score)))
+        purity_factor = clean_purity / 10.0
+
+        # --- 3. Calculer le Score Composite ---
+        # Poids : 70% ML (Context), 30% Technique (Geometry)
+        # Ce réglage permet au ML de rester dominant tout en laissant la qualité du pattern
+        # faire la différence sur les cas limites (ex: ML à 0.45 mais Pureté à 9/10 -> Score final ~0.58)
+        WEIGHT_ML = 0.7
+        WEIGHT_PURITY = 0.3
+
+        final_score = (ml_probability * WEIGHT_ML) + (purity_factor * WEIGHT_PURITY)
+
+        logger.info(f"Score Hybride Calculé : {final_score:.4f} (ML: {ml_probability:.2f}, Pureté: {clean_purity:.1f})")
+
+        return final_score
