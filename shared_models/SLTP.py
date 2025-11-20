@@ -1,39 +1,87 @@
 
 import os
-
 import csv
 import logging
+from typing import List, Optional, Dict, Any, Union
 from google.cloud import storage
 
 # region SLTP
 class SLTP:
-    def __init__(self, id, nom, direction, harmonic, entry=0, sl=0, tp1=0, tp2=0, tp3=0, tp4=0, tp5=0, prix_courant=0, comment='', link='', trailingSL='No'):
+    """
+    Gère la logique de Stop-Loss (SL) et Take-Profit (TP) pour un trade actif.
+
+    Cette classe est responsable de la protection du capital (SL) et de la sécurisation des gains (TP).
+    Elle encapsule les seuils de prix critiques et la logique de mise à jour dynamique (Trailing SL)
+    pour adapter la sortie du trade à l'évolution du marché.
+    """
+    def __init__(self,
+                 id: str,
+                 nom: str,
+                 direction: str,
+                 harmonic: str,
+                 entry: Union[float, str] = 0,
+                 sl: Union[float, str] = 0,
+                 tp1: Union[float, str] = 0,
+                 tp2: Union[float, str] = 0,
+                 tp3: Union[float, str] = 0,
+                 tp4: Union[float, str] = 0,
+                 tp5: Union[float, str] = 0,
+                 prix_courant: Union[float, str] = 0,
+                 comment: str = '',
+                 link: str = '',
+                 trailingSL: str = 'No'):
+        """
+        Initialise un gestionnaire SL/TP pour un trade spécifique.
+
+        Args:
+            id (str): Identifiant unique du trade.
+            nom (str): Symbole de l'actif (ex: 'BTC').
+            direction (str): 'LONG' ou 'SHORT'.
+            harmonic (str): Nom du pattern harmonique associé.
+            entry (Union[float, str]): Prix d'entrée.
+            sl (Union[float, str]): Prix du Stop-Loss initial.
+            tp1 (Union[float, str]): Premier niveau de prise de profit.
+            tp2 (Union[float, str]): Deuxième niveau de prise de profit.
+            tp3 (Union[float, str]): Troisième niveau de prise de profit.
+            tp4 (Union[float, str]): Quatrième niveau de prise de profit.
+            tp5 (Union[float, str]): Cinquième niveau de prise de profit.
+            prix_courant (Union[float, str]): Dernier prix connu.
+            comment (str): État ou commentaire actuel (ex: 'invalidated', 'tp1 hit').
+            link (str): Lien vers le graphique ou l'analyse.
+            trailingSL (str): Configuration du Trailing SL ('No', 'Each TP', 'Each 2 TP').
+        """
         self.id = id
         self.nom = nom
         self.direction = direction or 'SHORT'
         self.harmonic = harmonic
-        self.entry = entry
+        self.entry = float(entry)
         self.entry_prc = 0
-        self.sl = sl
+        self.sl = float(sl)
         self.sl_prc = 0
-        self.tp1 = tp1
+        self.tp1 = float(tp1)
         self.tp1_prc = 0
-        self.tp2 = tp2
+        self.tp2 = float(tp2)
         self.tp2_prc = 0
-        self.tp3 = tp3
+        self.tp3 = float(tp3)
         self.tp3_prc = 0
-        self.tp4 = tp4
+        self.tp4 = float(tp4)
         self.tp4_prc = 0
-        self.tp5 = tp5
+        self.tp5 = float(tp5)
         self.tp5_prc = 0
-        self.prix_courant = prix_courant
+        self.prix_courant = float(prix_courant)
         self.comment = comment
         self.link = link
         self.trailingSL = trailingSL
 
     
 
-    def handle_sl(self):
+    def handle_sl(self) -> None:
+        """
+        Vérifie si le Stop-Loss a été atteint en fonction du prix courant.
+
+        Si le prix franchit le niveau de SL dans la mauvaise direction, le statut (commentaire)
+        est mis à jour à 'invalidated' pour signaler la clôture nécessaire de la position.
+        """
         if self.direction == 'LONG':
             if self.prix_courant < float(self.sl):
                 if self.comment != 'invalidated':
@@ -45,7 +93,16 @@ class SLTP:
 
                     self.comment = 'invalidated'
 
-    def mise_a_jour_prix(self, data):
+    def mise_a_jour_prix(self, data: List[Dict[str, Any]]) -> None:
+        """
+        Met à jour le prix courant à partir d'un flux de données de marché.
+
+        Cette méthode synchronise l'objet avec le marché réel et déclenche immédiatement
+        la vérification du Stop-Loss.
+
+        Args:
+            data (List[Dict[str, Any]]): Liste de dictionnaires de tickers.
+        """
         symbole = self.nom + "USDT"
         for item in data:
             if item['symbol'] == symbole:
@@ -54,7 +111,13 @@ class SLTP:
                 break
 
 
-    def calculate_sltp_percentage(self):
+    def calculate_sltp_percentage(self) -> None:
+        """
+        Calcule la distance en pourcentage entre le prix courant et tous les niveaux clés (Entry, SL, TPs).
+
+        Ces pourcentages sont essentiels pour l'interface utilisateur, permettant au trader
+        de visualiser rapidement combien de marge il reste avant un TP ou un SL.
+        """
         self.entry_prc = format(((float(self.prix_courant) - float(self.entry)) /
                                  float(self.entry) * 100), ".2f") if self.entry else None
         self.sl_prc = format(((float(self.prix_courant) - float(self.sl)) /
@@ -72,7 +135,16 @@ class SLTP:
 
 
 
-    def adjust_stoploss(self):
+    def adjust_stoploss(self) -> float:
+        """
+        Calcule un ajustement fin du Stop-Loss pour tenir compte du spread ou des frais.
+
+        Ajoute ou soustrait un petit pourcentage (environ 0.17%) au SL théorique pour éviter
+        d'être sorti par le bruit du marché ou le spread de l'exchange.
+
+        Returns:
+            float: Le prix du Stop-Loss ajusté.
+        """
         # Adjust stop-loss by 2% for SELL positions
         if self.direction.lower() == 'sell' or self.direction.lower() == 'short':
             stop_loss_adjusted = self.sl * \
@@ -93,11 +165,37 @@ class SLTP:
 
 
 class SltpManager:
-    def __init__(self, bucket_name):
+    """
+    Gère la collection des objets SLTP et leur persistance.
+
+    Cette classe offre des méthodes pour rechercher, mettre à jour et sauvegarder
+    les configurations de SL/TP, agissant comme une interface entre la logique métier
+    et le stockage (Cloud/Fichier).
+    """
+    def __init__(self, bucket_name: str):
+        """
+        Initialise le gestionnaire.
+
+        Args:
+            bucket_name (str): Nom du bucket Google Cloud Storage.
+        """
         self.bucket_name = bucket_name
 
 
-    def find_sltp(self, nom, direction, harmonic, tf, sltps):
+    def find_sltp(self, nom: str, direction: str, harmonic: str, tf: str, sltps: List[SLTP]) -> Optional[SLTP]:
+        """
+        Cherche un objet SLTP spécifique dans une liste basée sur ses caractéristiques clés.
+
+        Args:
+            nom (str): Symbole.
+            direction (str): 'LONG' ou 'SHORT'.
+            harmonic (str): Nom du pattern.
+            tf (str): Timeframe.
+            sltps (List[SLTP]): Liste des objets à parcourir.
+
+        Returns:
+            Optional[SLTP]: L'objet trouvé ou None.
+        """
         found_sltp = None
         for sltp in sltps:
             if (sltp.nom == nom and sltp.direction == direction and sltp.harmonic == harmonic and sltp.tf == tf):
@@ -106,7 +204,17 @@ class SltpManager:
         return found_sltp
 
 
-    def find_sltp_id(self, id, sltps):
+    def find_sltp_id(self, id: str, sltps: List[SLTP]) -> Optional[SLTP]:
+        """
+        Cherche un objet SLTP par son identifiant unique.
+
+        Args:
+            id (str): L'ID du trade.
+            sltps (List[SLTP]): Liste des objets à parcourir.
+
+        Returns:
+            Optional[SLTP]: L'objet trouvé ou None.
+        """
         found_sltp = None
         for sltp in sltps:
             if (sltp.id == id):
@@ -114,7 +222,19 @@ class SltpManager:
                 break
         return found_sltp
 
-    def update_sl_and_send_message(sltp, tp_hit, new_sl, message):
+    def update_sl_and_send_message(self, sltp: SLTP, tp_hit: str, new_sl: float, message: str) -> None:
+        """
+        Met à jour le Stop-Loss d'un trade suite à l'atteinte d'un Take-Profit (Trailing SL).
+
+        Cette méthode implémente la stratégie de sécurisation des gains : quand un TP est touché,
+        le SL est remonté pour verrouiller une partie des profits ou mettre le trade à "Break-Even".
+
+        Args:
+            sltp (SLTP): L'objet SLTP à modifier.
+            tp_hit (str): Le nom du TP atteint (ex: 'TP1').
+            new_sl (float): Le nouveau prix du Stop-Loss.
+            message (str): Message de log ou de notification (référence mutable, mais non retournée ici).
+        """
         if sltp.trailingSL == 'No':
             if sltp.comment != tp_hit:
                 message = "{} - sl kept the same .".format(tp_hit)
@@ -125,19 +245,44 @@ class SltpManager:
                 message = "{} - sl modified to {}.".format(tp_hit, new_sl)
                 sltp.comment = tp_hit
 
-    def check_tp_levels(self, sltp, price, tp_levels, tp_messages):
+    def check_tp_levels(self, sltp: SLTP, price: float, tp_levels: List[float], tp_messages: List[str]) -> bool:
+        """
+        Vérifie si un ou plusieurs niveaux de Take-Profit ont été franchis.
+
+        Si un TP est franchi, cette méthode déclenche la logique de mise à jour du SL (Trailing).
+
+        Args:
+            sltp (SLTP): L'objet SLTP.
+            price (float): Prix courant.
+            tp_levels (List[float]): Liste des prix des TP.
+            tp_messages (List[str]): Liste des labels correspondants (ex: ['TP1', 'TP2']).
+
+        Returns:
+            bool: True si un TP a été franchi, False sinon.
+        """
         for i, tp in enumerate(tp_levels):
             if (price > tp if sltp.direction == 'LONG' else price < tp):
                 if sltp.trailingSL == 'Each TP':
-                    sltp.update_sl_and_send_message(
-                        tp_messages[i], tp_levels[i - 1] if i > 0 else sltp.entry, tp_messages[i])
+                    self.update_sl_and_send_message(
+                        sltp, tp_messages[i], tp_levels[i - 1] if i > 0 else sltp.entry, tp_messages[i])
                 elif sltp.trailingSL == 'Each 2 TP' and i % 2 == 1:
-                    sltp.update_sl_and_send_message(
-                        tp_messages[i], tp_levels[i - 2] if i > 1 else sltp.entry, tp_messages[i])
+                    self.update_sl_and_send_message(
+                        sltp, tp_messages[i], tp_levels[i - 2] if i > 1 else sltp.entry, tp_messages[i])
                 return True
         return False
 
-    def handle_tp_and_sl(self, sltp, price, tp_levels, tp_messages):
+    def handle_tp_and_sl(self, sltp: SLTP, price: float, tp_levels: List[float], tp_messages: List[str]) -> None:
+        """
+        Orchestre la vérification complète des conditions de sortie (SL et TP).
+
+        Vérifie d'abord si le SL est touché (priorité à la protection). Sinon, vérifie les TP.
+
+        Args:
+            sltp (SLTP): L'objet trade.
+            price (float): Prix actuel.
+            tp_levels (List[float]): Niveaux de TP.
+            tp_messages (List[str]): Labels des TP.
+        """
         if sltp.direction == 'LONG':
             if price < float(sltp.sl):
                 if sltp.sl in tp_levels:
@@ -146,17 +291,26 @@ class SltpManager:
                 elif sltp.comment != 'invalidated':
                     sltp.direction = 'SHORT'
                     sltp.comment = 'invalidated'
-            elif sltp.check_tp_levels(price, tp_levels[::-1], tp_messages[::-1]):
+            elif self.check_tp_levels(sltp, price, tp_levels[::-1], tp_messages[::-1]):
                 return
         else:
             if price > float(sltp.sl):
                 if sltp.comment != 'invalidated':
                     sltp.direction = 'LONG'
                     sltp.comment = 'invalidated'
-            elif sltp.check_tp_levels(price, tp_levels, tp_messages):
+            elif self.check_tp_levels(sltp, price, tp_levels, tp_messages):
                 return
 
-    def charge_sltps_depuis_cloud(self, nom_fichier):
+    def charge_sltps_depuis_cloud(self, nom_fichier: str) -> List[SLTP]:
+        """
+        Charge les configurations SLTP depuis le Cloud Storage.
+
+        Args:
+            nom_fichier (str): Nom du fichier CSV.
+
+        Returns:
+            List[SLTP]: Liste d'objets SLTP chargés.
+        """
         sltps = []
         client = storage.Client()
         bucket = client.bucket(self.bucket_name)
@@ -185,7 +339,14 @@ class SltpManager:
         return sltps
 
 
-    def enregistrer_sltps_dans_csv(self, sltps, nom_fichier):
+    def enregistrer_sltps_dans_csv(self, sltps: List[SLTP], nom_fichier: str) -> None:
+        """
+        Sauvegarde les configurations SLTP actuelles dans le Cloud.
+
+        Args:
+            sltps (List[SLTP]): Liste des objets à sauvegarder.
+            nom_fichier (str): Nom du fichier de destination.
+        """
 
         client = storage.Client()
         bucket = client.bucket(self.bucket_name)
@@ -231,15 +392,16 @@ class SltpManager:
             logging.error(f"Failed to upload the file {nom_fichier}: {e}")
             
     
-    def charge_sltps_depuis_fichier_local(nom_fichier):
+    @staticmethod
+    def charge_sltps_depuis_fichier_local(nom_fichier: str) -> List[SLTP]:
         """
-        Load SLTP data from a local CSV file into a list of SLTP objects.
+        Charge les données SLTP depuis un fichier CSV local (Dev/Test).
 
         Args:
-            nom_fichier (str): The file path of the CSV file.
+            nom_fichier (str): Chemin du fichier local.
 
         Returns:
-            list: A list of SLTP objects.
+            List[SLTP]: Liste des objets SLTP.
         """
         sltps = []
         if not os.path.exists(nom_fichier):

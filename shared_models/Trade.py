@@ -1,24 +1,87 @@
 import csv
 import logging
 import os
+from typing import List, Optional, Dict, Any, Union
 from google.cloud import storage
 
-bucket_project="adept-coda-420809"
+bucket_project = "adept-coda-420809"
 
 # region indices
 class Trade:
-    def __init__(self, id, owner, nom, direction, harmonic, prix_seuil, prix_limit, 
-                 true1=None, true2=None, true1_triggered=False, true2_triggered=False, prix_courant=0, 
-                 comment='', status='', link='', pourcentage=0, X=0, A=0, B=0, C=0, D=0, old_status='', 
-                 has_4h_close_above=False, has_1_retest=False, has_sl=False, 
-                 has_tp1=False, has_tp2=False, has_tp3=False, has_tp4=False, has_tp5=False, 
-                 trailingSL='No', wantRetest='No', touched_entry=False, true3=0, true4=0, tf='4h', 
-                 PreEntrySlightTouch=False, PostEntrySlightTouch=False, PreLimitSlightTouch=False, 
-                 PostLimitSlightTouch=False, PreTrue1SlightTouch=False, PostTrue1SlightTouch=False, 
-                 PreTrue2SlightTouch=False, PostTrue2SlightTouch=False, confidence=3, invalidation=False, 
-                 has_3d_close_above=False, open_3min=0, close_3min=0, 
-                 high_3min=0, low_3min=0, open_4h=0, close_4h=0, high_4h=0, low_4h=0,
-                 purity_score=0.0, confluence_score=0.0, historical_win_rate=0.0):
+    """
+    Représente un ordre de trading unique et encapsule tout son cycle de vie et ses métadonnées.
+
+    Cette classe centralise l'état d'une opportunité de trading (entrée, cibles, stop-loss)
+    ainsi que son suivi en temps réel (prix courant, déclenchements). Elle permet au système
+    de prendre des décisions cohérentes (fermeture, ajustement) en se basant sur une source
+    de vérité unique pour chaque position.
+    """
+    def __init__(self,
+                 id: str,
+                 owner: str,
+                 nom: str,
+                 direction: str,
+                 harmonic: str,
+                 prix_seuil: float,
+                 prix_limit: float,
+                 true1: Optional[float] = None,
+                 true2: Optional[float] = None,
+                 true1_triggered: bool = False,
+                 true2_triggered: bool = False,
+                 prix_courant: float = 0.0,
+                 comment: str = '',
+                 status: str = '',
+                 link: str = '',
+                 pourcentage: Union[float, str] = 0,
+                 X: float = 0,
+                 A: float = 0,
+                 B: float = 0,
+                 C: float = 0,
+                 D: float = 0,
+                 old_status: str = '',
+                 has_4h_close_above: bool = False,
+                 has_1_retest: bool = False,
+                 has_sl: bool = False,
+                 has_tp1: bool = False,
+                 has_tp2: bool = False,
+                 has_tp3: bool = False,
+                 has_tp4: bool = False,
+                 has_tp5: bool = False,
+                 trailingSL: str = 'No',
+                 wantRetest: str = 'No',
+                 touched_entry: bool = False,
+                 true3: float = 0,
+                 true4: float = 0,
+                 tf: str = '4h',
+                 PreEntrySlightTouch: bool = False,
+                 PostEntrySlightTouch: bool = False,
+                 PreLimitSlightTouch: bool = False,
+                 PostLimitSlightTouch: bool = False,
+                 PreTrue1SlightTouch: bool = False,
+                 PostTrue1SlightTouch: bool = False,
+                 PreTrue2SlightTouch: bool = False,
+                 PostTrue2SlightTouch: bool = False,
+                 confidence: int = 3,
+                 invalidation: bool = False,
+                 has_3d_close_above: bool = False,
+                 open_3min: float = 0,
+                 close_3min: float = 0,
+                 high_3min: float = 0,
+                 low_3min: float = 0,
+                 open_4h: float = 0,
+                 close_4h: float = 0,
+                 high_4h: float = 0,
+                 low_4h: float = 0,
+                 purity_score: float = 0.0,
+                 confluence_score: float = 0.0,
+                 historical_win_rate: float = 0.0):
+        """
+        Initialise une nouvelle instance de Trade avec tous ses paramètres de configuration et d'état.
+
+        Les paramètres sont nombreux car l'objet doit persister l'intégralité du contexte technique
+        (points harmoniques X, A, B, C, D) et opérationnel (flags de déclenchement) pour survivre
+        aux redémarrages du système.
+        """
         self.id = id
         self.owner = owner
         self.nom = nom
@@ -72,7 +135,17 @@ class Trade:
         
         
 
-    def mise_a_jour_prix(self, data):
+    def mise_a_jour_prix(self, data: List[Dict[str, Any]]) -> None:
+        """
+        Met à jour le prix courant du trade en analysant le flux de données marché.
+
+        Cette méthode itère sur les données reçues pour trouver le symbole correspondant à ce trade.
+        La mise à jour est critique pour déclencher les calculs de pourcentage et vérifier les
+        conditions d'entrée ou de sortie lors des cycles suivants.
+
+        Args:
+            data (List[Dict[str, Any]]): Une liste de dictionnaires contenant les dernières données de marché (symbol, lastPrice, etc.).
+        """
         symbol = self.nom + 'USDT'
         
 
@@ -84,39 +157,78 @@ class Trade:
                 break
     
     
-    def pourcentage_difference(self):
+    def pourcentage_difference(self) -> str:
+        """
+        Calcule l'écart en pourcentage entre le prix courant et le prix seuil (entrée).
+
+        Ce calcul est utilisé pour évaluer la proximité du prix par rapport au point d'entrée,
+        permettant de filtrer ou de prioriser les notifications d'opportunités imminentes.
+        Retourne une chaîne formatée pour l'affichage direct dans les interfaces ou logs.
+
+        Returns:
+            str: Le pourcentage de différence formaté à deux décimales, ou une valeur élevée si le prix est nul.
+        """
         if self.prix_courant == 0:
-            return 99999
+            return "99999.00" # Retourner une string pour la cohérence du type de retour attendu
         return format(float(abs((self.prix_courant - self.prix_seuil) / self.prix_seuil) * 100),  ".2f") 
 
 
     # Function to check if the 4-hour close above or below the entry value
-    def check_close_above_entry(self, entry):
+    def check_close_above_entry(self, entry: Union[float, str]) -> bool:
+        """
+        Vérifie si la clôture de la bougie 4H a franchi le niveau d'entrée dans la direction opposée.
+
+        Cette vérification est essentielle pour valider la cassure d'un niveau (breakout) ou
+        détecter une invalidation potentielle du setup selon la direction du trade (SHORT ou LONG).
+
+        Args:
+            entry (Union[float, str]): Le prix d'entrée à comparer.
+
+        Returns:
+            bool: True si la clôture confirme le franchissement, False sinon.
+        """
         close = float(self.close_4h)
-        entry = float(entry)
+        entry_val = float(entry)
         if self.direction == "SHORT":
-            return close < entry
+            return close < entry_val
         else:
-            return close > entry
-
-
-
-
-
-
-
-
+            return close > entry_val
 
 
 # region import/export
 class TradeManager:
-    def __init__(self, bucket_name):
+    """
+    Gère la persistance et la récupération des objets Trade depuis le stockage Cloud ou local.
+
+    Cette classe abstraie la complexité des interactions I/O (CSV, Google Cloud Storage) pour
+    fournir aux services de haut niveau des méthodes simples de chargement et de sauvegarde
+    des portefeuilles de trades.
+    """
+    def __init__(self, bucket_name: str):
+        """
+        Initialise le gestionnaire avec le nom du bucket cible.
+
+        Args:
+            bucket_name (str): Le nom du bucket Google Cloud Storage utilisé pour la persistance.
+        """
         self.bucket_name = bucket_name
 
 
-    def charger_trades_depuis_cloud(self, nom_fichier):
+    def charger_trades_depuis_cloud(self, nom_fichier: str) -> List[Trade]:
+        """
+        Récupère et instancie une liste d'objets Trade depuis un fichier CSV stocké sur le Cloud.
+
+        Cette méthode est utilisée au démarrage des services ou lors des cycles de rafraîchissement
+        pour restaurer l'état complet du système à partir de la source de vérité persistante.
+
+        Args:
+            nom_fichier (str): Le nom du fichier CSV dans le bucket.
+
+        Returns:
+            List[Trade]: Une liste d'instances de la classe Trade.
+        """
         indices = []
-        client = storage.Client(bucket_project)
+        client = storage.Client(project=bucket_project)
         bucket = client.bucket(self.bucket_name)
         blob = bucket.blob(nom_fichier)
         content = blob.download_as_text()
@@ -143,11 +255,11 @@ class TradeManager:
                                 ) if ligne['Prix_courant'] else 0,
                 link=ligne['Link'] if ligne['Link'] else '',
                 pourcentage=ligne['Pourcentage'] if ligne['Pourcentage'] else 0,
-                X=ligne['X'] if ligne['X'] else 0,
-                A=ligne['A'] if ligne['A'] else 0,
-                B=ligne['B'] if ligne['B'] else 0,
-                C=ligne['C'] if ligne['C'] else 0,
-                D=ligne['D'] if ligne['D'] else 0,
+                X=float(ligne['X']) if ligne['X'] else 0,
+                A=float(ligne['A']) if ligne['A'] else 0,
+                B=float(ligne['B']) if ligne['B'] else 0,
+                C=float(ligne['C']) if ligne['C'] else 0,
+                D=float(ligne['D']) if ligne['D'] else 0,
                 old_status=ligne['OldStatus'] if ligne['OldStatus'] else ligne['Status'],
                 has_4h_close_above=ligne.get('Has4H', 'False') == 'True',
                 has_1_retest=ligne.get('Has1H', 'False') == 'True',
@@ -160,8 +272,8 @@ class TradeManager:
                 trailingSL=ligne.get('TrailingSL', 'No'),
                 wantRetest=ligne.get('WantRetest', 'No'),
                 touched_entry=ligne.get('Touched_entry', 'False') == 'True',
-                true3=ligne.get('True3', 0),
-                true4=ligne.get('True4', 0),
+                true3=float(ligne.get('True3', 0)),
+                true4=float(ligne.get('True4', 0)),
                 tf=ligne.get('Tf', '4H'),
                 PreEntrySlightTouch=ligne.get('PreEntrySlightTouch') == 'True',
                 PostEntrySlightTouch=ligne.get('PostEntrySlightTouch') == 'True',
@@ -171,7 +283,7 @@ class TradeManager:
                 PostTrue1SlightTouch=ligne.get('PostTrue1SlightTouch') == 'True',
                 PreTrue2SlightTouch=ligne.get('PreTrue2SlightTouch') == 'True',
                 PostTrue2SlightTouch=ligne.get('PostTrue2SlightTouch') == 'True',
-                confidence=ligne.get('Confidence', 3),
+                confidence=int(ligne.get('Confidence', 3)),
                 invalidation=ligne.get('Invalidation') == 'True',
                 has_3d_close_above=ligne.get('Has3dClosedAbove') == 'True',
                 purity_score=float(ligne.get('purity_score', 0.0)),
@@ -182,8 +294,19 @@ class TradeManager:
         return indices
 
 
-    def enregistrer_trades_dans_csv(self, indices, nom_fichier):
-        client = storage.Client(bucket_project)
+    def enregistrer_trades_dans_csv(self, indices: List[Trade], nom_fichier: str) -> None:
+        """
+        Sauvegarde l'état actuel d'une liste de trades dans un fichier CSV sur le Cloud.
+
+        Cette méthode assure la persistance des données après chaque cycle de mise à jour,
+        garantissant que les modifications (statuts, prix, triggers) sont sécurisées et
+        partagées entre les microservices.
+
+        Args:
+            indices (List[Trade]): La liste des objets Trade à sauvegarder.
+            nom_fichier (str): Le nom du fichier cible dans le bucket.
+        """
+        client = storage.Client(project=bucket_project)
         bucket = client.bucket(self.bucket_name)
         blob = bucket.blob(nom_fichier)
 
@@ -251,15 +374,19 @@ class TradeManager:
         
         
 
-    def charger_trades_depuis_fichier_local(self,nom_fichier):
+    def charger_trades_depuis_fichier_local(self, nom_fichier: str) -> List[Trade]:
         """
-        Load trades from a local CSV file into a list of Trade objects.
+        Charge les trades depuis un fichier CSV local.
+
+        Cette méthode est utile pour le développement local, les tests unitaires ou
+        lorsque l'accès au Cloud n'est pas disponible, permettant de simuler le comportement
+        du système avec des données statiques.
 
         Args:
-            nom_fichier (str): The file path of the CSV file.
+            nom_fichier (str): Le chemin vers le fichier CSV local.
 
         Returns:
-            list: A list of Trade objects.
+            List[Trade]: Une liste d'objets Trade.
         """
         trades = []
         if not os.path.exists(nom_fichier):
@@ -288,11 +415,11 @@ class TradeManager:
                                         ) if ligne['Prix_courant'] else 0,
                         link=ligne['Link'] if ligne['Link'] else '',
                         pourcentage=ligne['Pourcentage'] if ligne['Pourcentage'] else 0,
-                        X=ligne['X'] if ligne['X'] else 0,
-                        A=ligne['A'] if ligne['A'] else 0,
-                        B=ligne['B'] if ligne['B'] else 0,
-                        C=ligne['C'] if ligne['C'] else 0,
-                        D=ligne['D'] if ligne['D'] else 0,
+                        X=float(ligne['X']) if ligne['X'] else 0,
+                        A=float(ligne['A']) if ligne['A'] else 0,
+                        B=float(ligne['B']) if ligne['B'] else 0,
+                        C=float(ligne['C']) if ligne['C'] else 0,
+                        D=float(ligne['D']) if ligne['D'] else 0,
                         old_status=ligne['OldStatus'] if ligne['OldStatus'] else ligne['Status'],
                         has_4h_close_above=ligne.get('Has4H', 'False') == 'True',
                         has_1_retest=ligne.get('Has1H', 'False') == 'True',
@@ -305,8 +432,8 @@ class TradeManager:
                         trailingSL=ligne.get('TrailingSL', 'No'),
                         wantRetest=ligne.get('WantRetest', 'No'),
                         touched_entry=ligne.get('Touched_entry', 'False') == 'True',
-                        true3=ligne.get('True3', 0),
-                        true4=ligne.get('True4', 0),
+                        true3=float(ligne.get('True3', 0)),
+                        true4=float(ligne.get('True4', 0)),
                         tf=ligne.get('Tf', '4H'),
                         PreEntrySlightTouch=ligne.get('PreEntrySlightTouch') == 'False',
                         PostEntrySlightTouch=ligne.get('PostEntrySlightTouch') == 'False',
@@ -316,7 +443,7 @@ class TradeManager:
                         PostTrue1SlightTouch=ligne.get('PostTrue1SlightTouch') == 'False',
                         PreTrue2SlightTouch=ligne.get('PreTrue2SlightTouch') == 'False',
                         PostTrue2SlightTouch=ligne.get('PostTrue2SlightTouch') == 'False',
-                        confidence=ligne.get('Confidence',3),
+                        confidence=int(ligne.get('Confidence',3)),
                         purity_score=float(ligne.get('purity_score', 0.0)),
                         confluence_score=float(ligne.get('confluence_score', 0.0)),
                         historical_win_rate=float(ligne.get('historical_win_rate', 0.0)),

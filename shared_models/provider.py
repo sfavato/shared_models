@@ -5,34 +5,75 @@ import json
 import logging
 import time
 import logging
+from typing import Optional, List, Dict, Any, Tuple, Union
 
 import requests
 
-def get_timestamp():
+def get_timestamp() -> int:
+    """
+    Retourne le timestamp actuel en millisecondes.
+
+    Utilisé pour synchroniser les requêtes API et signer les payloads.
+    """
     return int(time.time() * 1000)
 
-def to_query_with_no_encode(params):
-    return '&'.join(f"{key}={value}" for key, value in params)
+def to_query_with_no_encode(params: Dict[str, Any]) -> str:
+    """
+    Convertit un dictionnaire de paramètres en chaîne de requête brute sans encodage URL.
 
-def pre_hash(timestamp, method, request_path, body):
+    Nécessaire pour la signature API de certains exchanges qui exigent un format spécifique.
+    """
+    return '&'.join(f"{key}={value}" for key, value in params.items())
+
+def pre_hash(timestamp: int, method: str, request_path: str, body: str) -> str:
+    """
+    Prépare la chaîne de caractères à signer pour l'authentification API.
+
+    Concatène les éléments critiques de la requête pour garantir son intégrité.
+    """
     return f"{timestamp}{method.upper()}{request_path}{body}"
 
 
-def sign(message, secret_key):
+def sign(message: str, secret_key: str) -> str:
+    """
+    Signe un message avec une clé secrète en utilisant HMAC-SHA256.
+
+    Garantit l'authenticité de la requête auprès de l'exchange.
+    """
     mac = hmac.new(bytes(secret_key, encoding='utf8'), bytes(
         message, encoding='utf-8'), digestmod='sha256')
     digest = mac.digest()
     return base64.b64encode(digest).decode()
 
-def parse_params_to_str(params):
-    params = [(key, val) for key, val in params.items()]
-    params.sort(key=lambda x: x[0])  # Sort by key
-    url = '?' + to_query_with_no_encode(params)
+def parse_params_to_str(params: Dict[str, Any]) -> str:
+    """
+    Trie et formate les paramètres d'URL.
+
+    Certains exchanges exigent un ordre lexicographique des paramètres pour la signature.
+    """
+    params_list = [(key, val) for key, val in params.items()]
+    params_list.sort(key=lambda x: x[0])  # Sort by key
+    url = '?' + to_query_with_no_encode(dict(params_list))
     return '' if url == '?' else url
 
 
 class Bitget:
-    def __init__(self, api_key, secret_key, passphrase, url, request_path):
+    """
+    Wrapper pour l'API Bitget (Futures).
+
+    Gère l'authentification, le passage d'ordres et la récupération des configurations de contrats.
+    """
+    def __init__(self, api_key: str, secret_key: str, passphrase: str, url: str, request_path: str):
+        """
+        Initialise le client Bitget.
+
+        Args:
+            api_key (str): Clé API publique.
+            secret_key (str): Clé secrète.
+            passphrase (str): Passphrase de sécurité du compte.
+            url (str): URL de base de l'API.
+            request_path (str): Chemin par défaut (ex: '/api/v2/...').
+        """
         self.api_key = api_key
         self.secret_key = secret_key
         self.passphrase = passphrase
@@ -40,10 +81,16 @@ class Bitget:
         self.request_path = request_path
 
 
+    def placeorder(self, api_key: str, secret_key: str, passphrase: str, request_path: str, base_url: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Envoie une requête signée pour placer un ordre sur Bitget.
 
+        Args:
+            params (Dict[str, Any]): Les détails de l'ordre (symbol, side, size, etc.).
 
-
-    def placeorder(self, api_key, secret_key, passphrase, request_path, base_url, params):
+        Returns:
+            Dict[str, Any]: La réponse JSON de l'API.
+        """
         timestamp = get_timestamp()
         body = json.dumps(params)  # Convert the request body to JSON format
         pre_hash_string = pre_hash(timestamp, "POST", request_path, body)
@@ -68,7 +115,18 @@ class Bitget:
     # Function to fetch decimals and minimum position size
 
 
-    def get_contract_config(self, api_key, secret_key, passphrase, base_url, symbol=None):
+    def get_contract_config(self, api_key: str, secret_key: str, passphrase: str, base_url: str, symbol: Optional[str] = None) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
+        """
+        Récupère les spécifications du contrat (précision prix/quantité).
+
+        Essentiel pour normaliser les ordres avant envoi (arrondis corrects) et éviter les rejets API.
+
+        Args:
+            symbol (Optional[str]): Le symbole spécifique à chercher (ex: 'BTCUSDT'). Si None, retourne tout.
+
+        Returns:
+            Union[Dict[str, Any], List[Dict[str, Any]]]: Configuration du contrat ou liste de configs.
+        """
         request_path = "/api/v2/mix/market/contracts"
         url = f"{base_url}{request_path}"
         timestamp = get_timestamp()
@@ -87,12 +145,11 @@ class Bitget:
             "ACCESS-PASSPHRASE": passphrase
         }
         # Make the GET request
-        logging.log(
-            "Bitget Query for contract config: '{'productType':'usdt-futures','symbol':{symbol}'}'")
+        logging.log(logging.INFO,
+            f"Bitget Query for contract config: {{'productType':'usdt-futures','symbol':{symbol}}}")
         response = requests.get(url, headers=headers, params={
                                 "productType": "usdt-futures", "symbol": symbol})
-        logging.log(f"Bitget Response for contract config: {
-                        json.dumps(response.json(), indent=4)} ")
+        logging.log(logging.INFO, f"Bitget Response for contract config: {json.dumps(response.json(), indent=4)} ")
         # Handle response
         if response.status_code == 200:
             data = response.json().get("data", [])
@@ -100,7 +157,7 @@ class Bitget:
                 # Filter the data for the specified symbol
                 for contract in data:
                     if contract.get("symbol") == symbol:
-                        logging.log("Bitget contract config : " +
+                        logging.log(logging.INFO, "Bitget contract config : " +
                                         json.dumps(contract, indent=4))
                         return {
                             "symbol": contract.get("symbol"),
@@ -120,7 +177,28 @@ class Bitget:
 
     # Parameters for the POST request
 
-    def place_trade(self,symbol, price, leverage, quantityUSDT, side, tp, sl, priceDecimals, minQuantity, marketPrice):
+    def place_trade(self, symbol: str, price: float, leverage: int, quantityUSDT: float, side: str, tp: float, sl: float, priceDecimals: int, minQuantity: float, marketPrice: bool) -> Dict[str, Any]:
+        """
+        Place un trade complet avec TP et SL.
+
+        Cette méthode wrapper simplifie la création d'ordres complexes en gérant
+        le calcul de taille (size) à partir du montant USDT et du levier.
+
+        Args:
+            symbol (str): Pair de trading.
+            price (float): Prix d'entrée (limit) ou courant (market).
+            leverage (int): Levier à utiliser.
+            quantityUSDT (float): Montant de la marge en USDT.
+            side (str): 'open_long' ou 'open_short'.
+            tp (float): Prix du Take Profit.
+            sl (float): Prix du Stop Loss.
+            priceDecimals (int): Précision décimale du prix.
+            minQuantity (float): Quantité minimum du contrat (non utilisé directement ici mais utile pour validation).
+            marketPrice (bool): Si True, ordre Market. Si False, ordre Limit.
+
+        Returns:
+            Dict[str, Any]: Résultat de l'ordre.
+        """
         if marketPrice:
 
             order_params = {
@@ -163,21 +241,32 @@ class Bitget:
                 "presetStopLossPrice": round(sl, int(priceDecimals)),
                 "force": "gtc"               # Order execution type
             }
-        logging.log(f"Bitget in-trade placing order: {symbol} {side} x{leverage} current: {
-                        price}, tp: {tp} sl: {sl} qty:{round(int(quantityUSDT)/price)*leverage}")
+        logging.log(logging.INFO, f"Bitget in-trade placing order: {symbol} {side} x{leverage} current: {price}, tp: {tp} sl: {sl} qty:{round(int(quantityUSDT)/price)*leverage}")
         result = self.placeorder(self.api_key, self.secret_key, self.passphrase, self.request_path, self.url, order_params)
-        logging.log(f"Bitget in-trade result: {json.dumps(result, indent=4)}")
+        logging.log(logging.INFO, f"Bitget in-trade result: {json.dumps(result, indent=4)}")
+        return result
+
+
 class Binance:
+    """
+    Wrapper pour l'API publique de Binance (Data).
+
+    Utilisé principalement pour récupérer des données de marché historiques et temps réel (Klines).
+    """
     def __init__(self):
         self.logger = logging.getLogger(__name__)
 
     @staticmethod
-    def obtenir_tous_les_prix(symbols, chunk_size=100):
+    def obtenir_tous_les_prix(symbols: List[str], chunk_size: int = 100) -> Optional[List[Dict[str, Any]]]:
         """
-        Récupère les prix pour une liste de symboles en effectuant des requêtes en morceaux.
-        :param symbols: Liste des symboles à récupérer.
-        :param chunk_size: Taille maximale des symboles par requête.
-        :return: Liste des résultats combinés ou None en cas d'erreur.
+        Récupère les prix (tickers) pour une liste massive de symboles en optimisant les requêtes par lots.
+
+        Args:
+            symbols (List[str]): Liste des symboles à récupérer.
+            chunk_size (int): Taille maximale des symboles par requête pour éviter les limites d'URL.
+
+        Returns:
+            Optional[List[Dict[str, Any]]]: Liste des résultats combinés ou None en cas d'erreur critique.
         """
         url = "https://data-api.binance.vision/api/v3/ticker"
         results = []
@@ -193,21 +282,21 @@ class Binance:
                 response.raise_for_status()  # Vérifier si la requête a réussi
                 results.extend(response.json())  # Ajouter les résultats à la liste
             except requests.exceptions.RequestException as e:
-                logging.log(f"Erreur lors de la requête pour les symboles {chunk}: {e}")
+                logging.log(logging.ERROR, f"Erreur lors de la requête pour les symboles {chunk}: {e}")
                 return None
 
         return results  # Retourner tous les résultats combinés
     
     
-    def get_symbol_precision(self, symbol):
+    def get_symbol_precision(self, symbol: str) -> Dict[str, int]:
         """
-        Fetch the price and quantity precision for a given symbol.
+        Récupère la précision requise pour le prix et la quantité d'un actif sur Binance.
 
         Args:
-            symbol (str): The trading pair symbol (e.g., 'MINAUSDT').
+            symbol (str): Symbole (ex: 'MINAUSDT').
 
         Returns:
-            dict: A dictionary with 'price_precision' and 'quantity_precision'.
+            Dict[str, int]: Dictionnaire {'price_precision': int, 'quantity_precision': int}.
         """
         url = "https://api.binance.com/api/v3/exchangeInfo"
         response = requests.get(url, params={"symbol": symbol})
@@ -233,8 +322,19 @@ class Binance:
     # Get the candlestick data for a given symbol and timeframe
     # The start_time and end_time parameters should be in milliseconds
     # The symbol parameter should be the trading pair symbol (e.g. "BTC")
-    def get_candlestick_data(self,symbol, start_time, end_time, timeframe='4h'):
+    def get_candlestick_data(self, symbol: str, start_time: int, end_time: int, timeframe: str = '4h') -> Optional[List[List[Any]]]:
+        """
+        Récupère les bougies (Klines) historiques.
 
+        Args:
+            symbol (str): Symbole.
+            start_time (int): Timestamp début (ms).
+            end_time (int): Timestamp fin (ms).
+            timeframe (str): Intervalle (ex: '4h').
+
+        Returns:
+            Optional[List[List[Any]]]: Données brutes OHLCV de Binance ou None.
+        """
         base_url = "https://data-api.binance.vision"
         endpoint = f"/api/v3/klines?symbol={symbol}&interval={timeframe}&startTime={start_time}&endTime={end_time}"
 
@@ -248,7 +348,15 @@ class Binance:
             return None
         return response.json()
     
-    def get_highest_3min(self,symbol):
+    def get_highest_3min(self, symbol: str) -> Union[Tuple[float, float, float, float], bool]:
+        """
+        Récupère les données OHLC de la dernière bougie 3 minutes terminée.
+
+        Utilisé pour des vérifications micro-structurelles (High Frequency checks).
+
+        Returns:
+            Tuple[float, float, float, float]: (High, Low, Close, Open) ou False si échec.
+        """
         current_timestamp = int(time.time() * 1000)
         previous_3m_candlestick_end = (
             current_timestamp // (3 * 60 * 1000)) * (3 * 60 * 1000)
@@ -263,7 +371,13 @@ class Binance:
         return float(jsonData[0][2]),  float(jsonData[0][3]), float(jsonData[0][4]), float(jsonData[0][1])
     
     # Get the last 15m candlestick data and returns high, low, close, open
-    def get_highest_15min(self,symbol):
+    def get_highest_15min(self, symbol: str) -> Union[Tuple[float, float, float, float], bool]:
+        """
+        Récupère les données OHLC de la dernière bougie 15 minutes terminée.
+
+        Returns:
+            Tuple[float, float, float, float]: (High, Low, Close, Open) ou False si échec.
+        """
         current_timestamp = int(time.time() * 1000)
         previous_15m_candlestick_end = (
             current_timestamp // (15 * 60 * 1000)) * (15 * 60 * 1000)
@@ -280,7 +394,13 @@ class Binance:
 
                 
     @staticmethod
-    def calculate_current_timestamps():
+    def calculate_current_timestamps() -> Tuple[int, int]:
+        """
+        Calcule les bornes temporelles de la dernière bougie 4H complétée.
+
+        Returns:
+            Tuple[int, int]: (Start Time, End Time) en ms.
+        """
         current_timestamp = int(time.time() * 1000)
         previous_4h_candlestick_end = (
             current_timestamp // (4 * 60 * 60 * 1000)) * (4 * 60 * 60 * 1000)
@@ -289,7 +409,13 @@ class Binance:
         return previous_4h_candlestick_start, previous_4h_candlestick_end
 
     @staticmethod
-    def calculate_previous_4h_timestamps():
+    def calculate_previous_4h_timestamps() -> Tuple[int, int]:
+        """
+        Calcule les bornes temporelles de l'avant-dernière bougie 4H.
+
+        Returns:
+            Tuple[int, int]: (Start Time, End Time) en ms.
+        """
         current_timestamp = int(time.time() * 1000)
         previous_4h_candlestick_end = (
             current_timestamp // (4 * 60 * 60 * 1000)) * (4 * 60 * 60 * 1000)
@@ -301,7 +427,13 @@ class Binance:
         return start_of_before_4h_candlestick, end_of_before_4h_candlestick
 
     @staticmethod
-    def calculate_3d_timestamps():
+    def calculate_3d_timestamps() -> Tuple[int, int]:
+        """
+        Calcule les bornes temporelles de l'avant-dernière bougie 3 jours.
+
+        Returns:
+            Tuple[int, int]: (Start Time, End Time) en ms.
+        """
         current_timestamp = int(time.time() * 1000)
         previous_3d_candlestick_end = (
             current_timestamp // (3 * 24 * 60 * 60 * 1000)) * (3 * 24 * 60 * 60 * 1000)
@@ -313,7 +445,13 @@ class Binance:
         return start_of_before_3d_candlestick, end_of_before_3d_candlestick
     
     @staticmethod
-    def calculate_previous_two_4h_candlesticks():
+    def calculate_previous_two_4h_candlesticks() -> Tuple[int, int]:
+        """
+        Calcule le timestamp de début de la bougie 4H d'il y a 8 heures.
+
+        Returns:
+            Tuple[int, int]: (Start Time, End Time) en ms.
+        """
         current_timestamp = int(time.time() * 1000)
 
         # Calculate the timestamp of the previous 4-hour candlestick
