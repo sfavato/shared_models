@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
-from typing import Optional
+import logging
 from .features import (
     calculate_divergence_score,
     oi_weighted_funding_momentum,
@@ -12,47 +12,47 @@ from .features import (
 )
 from .pipeline import PreprocessingPipeline
 
+logger = logging.getLogger(__name__)
+
 def generate_confidence_scores(
     merged_df: pd.DataFrame,
     lookback_period: int = 20,
-    pipeline_path: Optional[str] = None
+    pipeline_path: str = None
 ) -> np.ndarray:
     """
-    Orchestre le calcul complet des scores de confiance à partir d'un DataFrame consolidé.
-
-    Cette fonction agit comme le point d'entrée principal du moteur de scoring. Elle transforme
-    les données brutes de marché (OHLCV, On-Chain) en un vecteur de probabilités utilisable
-    par le système de décision. Elle assure l'extraction des features (Feature Engineering)
-    puis leur normalisation via le pipeline ML pré-entraîné.
-
-    Args:
-        merged_df (pd.DataFrame): DataFrame contenant toutes les séries de données nécessaires synchronisées par timestamp.
-        lookback_period (int): La fenêtre glissante pour les calculs de features (ex: divergences).
-        pipeline_path (Optional[str]): Le chemin vers le fichier .pkl du pipeline scikit-learn entraîné.
-
-    Returns:
-        np.ndarray: Un tableau numpy des scores de confiance/features traités, prêt pour l'inférence ou le stockage.
+    Orchestre le calcul complet et renvoie [c1, c2, c3] pour chaque ligne.
+    c1: Score IA (Pipeline)
+    c2: Score Divergence (Structure)
+    c3: Score Trapped/Momentum (Sentiment)
     """
     # ÉTAPE 1: Initialiser un dictionnaire pour stocker les features calculées.
     features = {}
 
-    # Extraction sécurisée des séries de données du DataFrame.
-    # L'utilisation de .get() permet une robustesse si certaines colonnes optionnelles manquent.
+    # Sécurisation des colonnes requises
+    required_cols = ['close', 'CVD', 'open_interest', 'funding_rate']
+    for col in required_cols:
+        if col not in merged_df.columns:
+            logger.error(f"Missing column: {col}")
+            return np.array([])
+
+    # Extraire les séries de données du DataFrame
     price = merged_df['close']
     cvd = merged_df['CVD']
     open_interest = merged_df['open_interest']
     funding_rate = merged_df['funding_rate']
+    
+    # Gestion des optionnels avec get()
     long_liquidations = merged_df.get('long_liquidations_usd')
     short_liquidations = merged_df.get('short_liquidations_usd')
     mvrv = merged_df.get('mvrv_usd')
     netflow = merged_df.get('exchange_netflow_usd')
     whale_accumulation = merged_df.get('whale_accumulation_delta')
 
-    # ÉTAPE 2: Calculer les facteurs de base (Order Flow & Sentiment).
+    # ÉTAPE 2: Calculer les facteurs de base.
     features['divergence_score'] = calculate_divergence_score(price, cvd, lookback_period)
     features['oi_funding_momentum'] = oi_weighted_funding_momentum(funding_rate, open_interest, lookback_period)
 
-    # ÉTAPE 3: Calculer les facteurs optionnels (Liquidations, On-Chain) si les données sont présentes.
+    # ÉTAPE 3: Calculer les facteurs optionnels.
     if long_liquidations is not None and short_liquidations is not None:
         features['trapped_trader_score'] = trapped_trader_score(
             price_close=price,
@@ -60,6 +60,9 @@ def generate_confidence_scores(
             short_liquidations=short_liquidations,
             window=lookback_period
         )
+    else:
+        # Fallback si pas de liquidations
+        features['trapped_trader_score'] = pd.Series(0, index=merged_df.index)
 
     if mvrv is not None:
         features['mvrv_score'] = calculate_mvrv_score(mvrv)
@@ -68,26 +71,49 @@ def generate_confidence_scores(
     if whale_accumulation is not None:
         features['whale_accumulation_score'] = calculate_whale_accumulation_score(whale_accumulation)
 
-    # ÉTAPE 4: Combiner les facteurs en un seul DataFrame aligné temporellement.
-    features_df = pd.DataFrame(features)
+    # ÉTAPE 4: Combiner les facteurs en un seul DataFrame.
+    features_df = pd.DataFrame(features, index=merged_df.index)
 
-    # Gestion des valeurs manquantes (Backfill puis Forwardfill) pour garantir la continuité des données.
+    # Nettoyage des NaNs
     features_df.bfill(inplace=True)
     features_df.ffill(inplace=True)
+    features_df.fillna(0, inplace=True) # Sécurité ultime
 
-    # Vérification de sécurité : si le DataFrame est vide ou corrompu, on échoue silencieusement.
-    if features_df.empty or features_df.isnull().values.any():
+    if features_df.empty:
         return np.array([])
 
-    # ÉTAPE 5: Application du Pipeline ML (Normalisation + PCA).
-    # On ne transforme les données que si un pipeline entraîné est fourni.
+    # ÉTAPE 5: Génération des 3 Composantes (Le Patch "User Request")
+    
+    # --- C1: Le Score ML (Pipeline) ---
     if pipeline_path and os.path.exists(pipeline_path):
-        pipeline = PreprocessingPipeline.load(pipeline_path)
-        # IMPORTANT : Utiliser transform(), jamais fit(), pour éviter la fuite de données (data leakage) en production.
-        processed_features_df = pipeline.transform(features_df)
+        try:
+            pipeline = PreprocessingPipeline.load(pipeline_path)
+            c1_values = pipeline.transform(features_df)
+            # Si le pipeline renvoie un DataFrame, on prend les valeurs
+            if hasattr(c1_values, 'values'):
+                c1_values = c1_values.values
+        except Exception as e:
+            logger.error(f"Pipeline error: {e}")
+            c1_values = np.zeros((len(features_df), 1))
     else:
-        # Si pas de pipeline, on retourne un tableau vide ou on pourrait retourner les raw features selon le besoin.
-        # Ici, la convention est de retourner vide pour signaler l'absence de traitement ML valide.
-        return np.array([])
+        # Fallback simple: moyenne des scores normalisés si pas de modèle
+        c1_values = np.mean(features_df.values, axis=1).reshape(-1, 1)
 
-    return processed_features_df.to_numpy()
+    # Assurons-nous que c1 est bien 2D (N, 1)
+    if c1_values.ndim == 1:
+        c1_values = c1_values.reshape(-1, 1)
+
+    # --- C2: La Structure (Divergence) ---
+    c2_values = features_df['divergence_score'].values.reshape(-1, 1)
+
+    # --- C3: Le Sentiment (Trapped Trader ou Momentum) ---
+    # On privilégie Trapped Trader, sinon OI Momentum
+    if 'trapped_trader_score' in features_df.columns and features_df['trapped_trader_score'].abs().sum() > 0:
+        c3_values = features_df['trapped_trader_score'].values.reshape(-1, 1)
+    else:
+        c3_values = features_df['oi_funding_momentum'].values.reshape(-1, 1)
+
+    # Assemblage final : [C1, C2, C3]
+    final_scores = np.hstack([c1_values, c2_values, c3_values])
+
+    return final_scores
