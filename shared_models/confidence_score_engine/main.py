@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import os
 import logging
+import joblib
 from .features import (
     calculate_divergence_score,
     oi_weighted_funding_momentum,
@@ -17,13 +18,11 @@ logger = logging.getLogger(__name__)
 def generate_confidence_scores(
     merged_df: pd.DataFrame,
     lookback_period: int = 20,
-    pipeline_path: str = None
+    model_path: str = None,
+    preprocessor_path: str = None
 ) -> np.ndarray:
     """
-    Orchestre le calcul complet et renvoie [c1, c2, c3] pour chaque ligne.
-    c1: Score IA (Pipeline)
-    c2: Score Divergence (Structure)
-    c3: Score Trapped/Momentum (Sentiment)
+    Orchestre le calcul complet avec support pour Modèle + Préprocesseur séparés.
     """
     # ÉTAPE 1: Initialiser un dictionnaire pour stocker les features calculées.
     features = {}
@@ -84,26 +83,42 @@ def generate_confidence_scores(
     if features_df.empty:
         return np.array([])
 
-    # ÉTAPE 5: Génération des 3 Composantes (Le Patch "User Request")
+    # ÉTAPE 5: Génération des 3 Composantes (Mise à jour G.E.M.)
     
-    # --- C1: Le Score ML (Pipeline) ---
-    if pipeline_path and os.path.exists(pipeline_path):
-        try:
-            pipeline = PreprocessingPipeline.load(pipeline_path)
-            c1_values = pipeline.transform(features_df)
-            # Si le pipeline renvoie un DataFrame, on prend les valeurs
-            if hasattr(c1_values, 'values'):
-                c1_values = c1_values.values
-        except Exception as e:
-            logger.error(f"Pipeline error: {e}")
-            c1_values = np.zeros((len(features_df), 1))
-    else:
-        # Fallback simple: moyenne des scores normalisés si pas de modèle
-        c1_values = np.mean(features_df.values, axis=1).reshape(-1, 1)
+    # --- C1: Le Score ML ---
+    c1_values = None
 
-    # Assurons-nous que c1 est bien 2D (N, 1)
-    if c1_values.ndim == 1:
-        c1_values = c1_values.reshape(-1, 1)
+    # Cas 1 : On a le modèle et le préprocesseur (Le cas idéal)
+    if model_path and os.path.exists(model_path) and preprocessor_path and os.path.exists(preprocessor_path):
+        try:
+            # Chargement à la volée (ou idéalement pré-chargé hors de la fonction pour la perf)
+            preprocessor = joblib.load(preprocessor_path)
+            model = joblib.load(model_path)
+
+            # 1. Transformation des données brutes
+            X_processed = preprocessor.transform(features_df)
+
+            # 2. Prédiction (Probabilités)
+            # Le modèle XGBoost renvoie souvent [proba_0, proba_1]. On veut proba_1.
+            try:
+                c1_values = model.predict_proba(X_processed)[:, 1].reshape(-1, 1)
+            except AttributeError:
+                # Si c'est un regresseur ou autre
+                c1_values = model.predict(X_processed).reshape(-1, 1)
+
+            # Scaling x10 pour le format 0-10
+            c1_values = c1_values * 10
+
+        except Exception as e:
+            logger.error(f"Erreur chargement ML: {e}. Passage en mode fallback.")
+            c1_values = None
+
+    # Fallback (Si échec ou pas de fichiers)
+    if c1_values is None:
+        # Fallback simple: moyenne des scores normalisés
+        c1_values = np.mean(features_df.values, axis=1).reshape(-1, 1)
+        # On s'assure qu'on reste dans [0, 10] pour le fallback
+        c1_values = np.abs(c1_values) * 5  # Approximation grossière
 
     # --- C2: La Structure (Divergence) ---
     c2_values = features_df['divergence_score'].values.reshape(-1, 1)
@@ -115,7 +130,4 @@ def generate_confidence_scores(
     else:
         c3_values = features_df['oi_funding_momentum'].values.reshape(-1, 1)
 
-    # Assemblage final : [C1, C2, C3]
-    final_scores = np.hstack([c1_values, c2_values, c3_values])
-
-    return final_scores
+    return np.hstack([c1_values, c2_values, c3_values])
