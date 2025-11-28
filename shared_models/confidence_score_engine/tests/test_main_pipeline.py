@@ -70,10 +70,10 @@ def test_generate_confidence_scores_happy_path(market_data_fixture):
     assert isinstance(processed_features, np.ndarray)
     assert not np.isnan(processed_features).any()
     assert not np.isinf(processed_features).any()
-    # The number of rows should be the original size minus any NaNs from lookbacks
+    # The number of rows should be the original size
     assert processed_features.shape[0] > 0
-    # The number of columns should be less than or equal to the number of raw features (3)
-    assert processed_features.shape[1] <= 3
+    # The number of columns should be num_pca_components + c2 + c3
+    assert processed_features.shape[1] >= 3
 
 def test_generate_confidence_scores_with_nans(market_data_fixture):
     """
@@ -93,7 +93,7 @@ def test_generate_confidence_scores_with_nans(market_data_fixture):
 
 def test_generate_confidence_scores_all_nans_input():
     """
-    Tests the edge case where all input data is NaN. This should result in an empty array.
+    Tests the edge case where all input data is NaN. This should result in a zero-filled array.
     """
     size = 100
     nan_df = pd.DataFrame({
@@ -108,7 +108,8 @@ def test_generate_confidence_scores_all_nans_input():
     processed_features = generate_confidence_scores(nan_df, pipeline_path=None)
 
     assert isinstance(processed_features, np.ndarray)
-    assert processed_features.size == 0
+    assert processed_features.shape == (100, 3)
+    assert np.all(processed_features == 0)
 
 def test_output_statistical_properties(market_data_fixture):
     """
@@ -120,10 +121,11 @@ def test_output_statistical_properties(market_data_fixture):
 
     assert processed_features.shape[0] > 0
 
-    # Check the statistical properties of each principal component
-        # Check the statistical properties of each principal component
-    for i in range(processed_features.shape[1]):
+    # The number of PCA components is the total columns minus the two raw scores (c2, c3)
+    num_pca_components = processed_features.shape[1] - 2
+
+    # Check the statistical properties of each principal component (c1)
+    for i in range(num_pca_components):
         component = processed_features[:, i]
-            # After quantile transform to a normal distribution and PCA, the mean of the components should be near 0.
-            # The std is not expected to be 1, as PCA components capture variance.
+        # After quantile transform to a normal distribution and PCA, the mean of the components should be near 0.
         assert np.isclose(np.mean(component), 0, atol=0.2), f"Mean of PC {i} is not close to 0"

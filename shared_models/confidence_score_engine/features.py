@@ -1,52 +1,79 @@
 import pandas as pd
 import numpy as np
+from scipy.stats import linregress
 from typing import Dict, Optional, List, Any, Union
 
-def calculate_divergence_score(price: pd.Series, cvd: pd.Series, lookback_period: int) -> pd.Series:
+def calculate_obv(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """Calcule l'On-Balance Volume (Proxy du CVD)."""
+    # Si close[i] > close[i-1], on ajoute le volume
+    # Si close[i] < close[i-1], on soustrait le volume
+    price_change = close.diff().fillna(0)
+    direction = np.sign(price_change)
+    # On multiplie le volume par la direction (+1, -1 ou 0)
+    adjusted_volume = volume * direction
+    # On fait la somme cumulée
+    obv = adjusted_volume.cumsum()
+    return obv
+
+def calculate_divergence_score(price: pd.Series, cvd: pd.Series, window: int = 20, volume: pd.Series = None) -> pd.Series:
     """
-    Calcule un score basé sur les divergences entre le prix et le CVD (Cumulative Volume Delta).
-
-    L'objectif est de détecter les épuisements de tendance ou les absorptions cachées.
-    Une divergence indique que l'agressivité des acheteurs/vendeurs (CVD) ne valide pas
-    le mouvement du prix, suggérant un retournement imminent.
-
-    Une divergence haussière (+1) est détectée si le prix atteint un nouveau plus bas
-    sur la période de référence alors que le CVD refuse de faire un plus bas (absorption des ventes).
-    Une divergence baissière (-1) est détectée si le prix atteint un nouveau plus haut
-    alors que le CVD échoue à suivre (épuisement des achats).
-
-    Args:
-        price (pd.Series): Série temporelle des prix, utilisée pour identifier les extrêmes du marché.
-        cvd (pd.Series): Série temporelle du Cumulative Volume Delta, représentant le flux d'ordres agressif.
-        lookback_period (int): La fenêtre glissante (en nombre de périodes) pour identifier les plus hauts/bas locaux.
-
-    Returns:
-        pd.Series: Une série temporelle contenant le score de divergence lissé, permettant de filtrer le bruit.
+    Detects divergences between Price and Flow (CVD or OBV).
+    Returns a score between -1.0 (Bearish Div) and +1.0 (Bullish Div).
     """
-    # ÉTAPE 1: Trouver les extrêmes du prix et du CVD sur la fenêtre glissante pour établir le contexte local.
-    price_high = price.rolling(window=lookback_period).max()
-    cvd_high = cvd.rolling(window=lookback_period).max()
-    price_low = price.rolling(window=lookback_period).min()
-    cvd_low = cvd.rolling(window=lookback_period).min()
+    if len(price) < window:
+        return pd.Series(0, index=price.index)
 
-    # ÉTAPE 2: Identifier les moments où le prix actuel "break" la structure locale (nouveau sommet/creux).
-    is_new_price_high = (price == price_high)
-    is_new_price_low = (price == price_low)
+    # --- PATCH G.E.M. : FALLBACK OBV ---
+    # Si le CVD est plat (variance nulle ou données manquantes) et qu'on a du Volume
+    flow_indicator = cvd
+    if (cvd.std() == 0 or cvd.sum() == 0) and volume is not None:
+        # On calcule l'OBV pour remplacer le CVD mort
+        flow_indicator = calculate_obv(price, volume)
+    # -----------------------------------
 
-    # ÉTAPE 3: Définir les conditions de divergence.
-    # On compare le CVD actuel aux extrêmes précédents (.shift(1)) pour confirmer l'absence de validation par le volume.
-    bearish_divergence = (is_new_price_high) & (cvd < cvd_high.shift(1))
-    bullish_divergence = (is_new_price_low) & (cvd > cvd_low.shift(1))
+    scores = []
+    for i in range(len(price)):
+        if i < window:
+            scores.append(0.0)
+            continue
 
-    # ÉTAPE 4: Créer le score brut directionnel.
-    # Le score est +1 pour une divergence haussière (signal d'achat), -1 pour une baissière (signal de vente).
-    divergence_score = bullish_divergence.astype(int) - bearish_divergence.astype(int)
+        # Slicing window
+        p_slice = price.iloc[i-window:i]
+        f_slice = flow_indicator.iloc[i-window:i] # Use flow_indicator instead of cvd
 
-    # ÉTAPE 5: Lisser le signal pour capturer un état persistant plutôt qu'un pic instantané.
-    # Cela stabilise le feature pour le modèle ML.
-    smoothed_score = divergence_score.rolling(window=5, min_periods=1).sum()
+        # Normalize for slope comparison
+        p_norm = (p_slice - p_slice.mean()) / (p_slice.std() + 1e-9)
+        f_norm = (f_slice - f_slice.mean()) / (f_slice.std() + 1e-9)
 
-    return smoothed_score
+        x = np.arange(window)
+
+        try:
+            slope_p = linregress(x, p_norm).slope
+            slope_f = linregress(x, f_norm).slope
+
+            # BULLISH DIVERGENCE: Price Down, Flow Up
+            if slope_p < -0.05 and slope_f > 0.05:
+                scores.append(min(slope_f - slope_p, 1.0)) # Positive score
+
+            # BEARISH DIVERGENCE: Price Up, Flow Down
+            elif slope_p > 0.05 and slope_f < -0.05:
+                scores.append(max(slope_f - slope_p, -1.0)) # Negative score
+
+            # CONVERGENCE (Trend Confirmation)
+            # Price Up, Flow Up -> Good (Small positive bonus)
+            elif slope_p > 0.05 and slope_f > 0.05:
+                scores.append(0.1)
+            # Price Down, Flow Down -> Bad (Small negative penalty)
+            elif slope_p < -0.05 and slope_f < -0.05:
+                scores.append(-0.1)
+
+            else:
+                scores.append(0.0)
+
+        except Exception:
+            scores.append(0.0)
+
+    return pd.Series(scores, index=price.index)
 
 
 def oi_weighted_funding_momentum(funding_rate: pd.Series, open_interest: pd.Series, lookback: int) -> pd.Series:
