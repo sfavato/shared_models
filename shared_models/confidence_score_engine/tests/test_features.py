@@ -26,32 +26,32 @@ def sample_data():
 
 def test_bearish_divergence(sample_data):
     """Test that a bearish divergence returns a negative score."""
-    price = pd.Series([100, 110, 120, 130, 140, 150]) # New high
-    cvd = pd.Series([500, 550, 600, 580, 560, 540])   # Lower high
+    price = pd.Series([100, 110, 120, 130, 140, 150])  # Strongly rising price
+    cvd = pd.Series([600, 580, 560, 540, 520, 500])    # Strongly falling CVD
 
-    score = calculate_divergence_score(price, cvd, lookback_period=LOOKBACK)
+    score = calculate_divergence_score(price, cvd, window=LOOKBACK)
 
-    # The last smoothed score should be negative due to the divergence
+    # The last score should be negative due to the clear bearish divergence
     assert score.iloc[-1] < 0
 
 def test_bullish_divergence(sample_data):
     """Test that a bullish divergence returns a positive score."""
-    price = pd.Series([150, 140, 130, 120, 110, 100]) # New low
-    cvd = pd.Series([600, 550, 500, 520, 540, 560])   # Higher low
+    price = pd.Series([150, 140, 130, 120, 110, 100])  # Strongly falling price
+    cvd = pd.Series([500, 520, 540, 560, 580, 600])    # Strongly rising CVD
 
-    score = calculate_divergence_score(price, cvd, lookback_period=LOOKBACK)
+    score = calculate_divergence_score(price, cvd, window=LOOKBACK)
 
-    # The last smoothed score should be positive
+    # The last score should be positive due to the clear bullish divergence
     assert score.iloc[-1] > 0
 
 def test_no_divergence(sample_data):
     """Test that no divergence returns a zero score."""
-    price = pd.Series([100, 110, 120, 130, 140, 135]) # No new high/low at the end
-    cvd = pd.Series([500, 550, 600, 650, 700, 680])   # Moving with price
+    price = pd.Series([100, 101, 100, 101, 100, 101])  # Flat/choppy price
+    cvd = pd.Series([500, 499, 500, 499, 500, 499])    # Flat/choppy CVD
 
-    score = calculate_divergence_score(price, cvd, lookback_period=LOOKBACK)
+    score = calculate_divergence_score(price, cvd, window=LOOKBACK)
 
-    # The last score should be zero as there's no divergence event
+    # The last score should be zero as there's no clear trend
     assert score.iloc[-1] == 0
 
 def test_oi_weighted_funding_momentum_positive(sample_data):

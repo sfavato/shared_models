@@ -35,9 +35,10 @@ def generate_confidence_scores(
             logger.error(f"Missing column: {col}")
             return np.array([])
 
-    # Extraire les séries de données du DataFrame
+    # Extraire les séries
     price = merged_df['close']
     cvd = merged_df['CVD']
+    volume = merged_df.get('volume') # On récupère le volume (présent dans les klines)
     open_interest = merged_df['open_interest']
     funding_rate = merged_df['funding_rate']
     
@@ -49,7 +50,8 @@ def generate_confidence_scores(
     whale_accumulation = merged_df.get('whale_accumulation_delta')
 
     # ÉTAPE 2: Calculer les facteurs de base.
-    features['divergence_score'] = calculate_divergence_score(price, cvd, lookback_period)
+    # PATCH : On passe 'volume' pour activer le fallback OBV
+    features['divergence_score'] = calculate_divergence_score(price, cvd, lookback_period, volume=volume)
     features['oi_funding_momentum'] = oi_weighted_funding_momentum(funding_rate, open_interest, lookback_period)
 
     # ÉTAPE 3: Calculer les facteurs optionnels.
