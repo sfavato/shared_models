@@ -1,7 +1,11 @@
 import logging
 from typing import Union
+from decimal import Decimal, getcontext
 
 logger = logging.getLogger(__name__)
+
+# Définir la précision pour les calculs décimaux
+getcontext().prec = 10
 
 class DynamicScoreCalculator:
     """
@@ -33,17 +37,24 @@ class DynamicScoreCalculator:
         """
         # Pondération recommandée pour Démarrage Phase II
         # Ces poids sont ajustés pour donner la priorité à l'IA tout en gardant des garde-fous techniques et fondamentaux.
-        w_ml = 0.40       # L'IA reste le signal primaire (40%).
-        w_purity = 0.20   # La qualité visuelle/technique du pattern (20%).
-        w_regime = 0.25   # Le contexte de marché (25%), crucial pour la gestion du risque.
-        w_history = 0.15  # La performance passée (15%), comme validateur supplémentaire.
+        w_ml = Decimal('0.40')
+        w_purity = Decimal('0.20')
+        w_regime = Decimal('0.25')
+        w_history = Decimal('0.15')
 
-        final_score = (ml_proba * w_ml) + \
-                      (purity_score * w_purity) + \
-                      (market_regime_score * w_regime) + \
-                      (win_rate_score * w_history)
+        ml_proba_d = Decimal(str(ml_proba))
+        purity_score_d = Decimal(str(purity_score))
+        market_regime_score_d = Decimal(str(market_regime_score))
+        win_rate_score_d = Decimal(str(win_rate_score))
 
-        final_score_normalized = round(final_score * 10, 1)
+        final_score = (ml_proba_d * w_ml) + \
+                      (purity_score_d * w_purity) + \
+                      (market_regime_score_d * w_regime) + \
+                      (win_rate_score_d * w_history)
+
+        final_score_normalized = float(
+            (final_score * Decimal('10')).quantize(Decimal('0.1'))
+        )
 
         logger.info(
             f"Score Dynamique Calculé : {final_score_normalized}/10 "
@@ -52,3 +63,22 @@ class DynamicScoreCalculator:
         )
 
         return final_score_normalized
+
+    def calculate_score(self, features_dict: dict) -> float:
+        """
+        Wrapper pour compatibilité avec l'ancienne interface.
+        """
+        ml_proba = features_dict.get('ml_proba', 0.5)
+        purity_score = features_dict.get('purity', 0.5)
+        market_regime_score = features_dict.get('regime', 0.5)
+        win_rate_score = features_dict.get('win_rate', 0.5)
+
+        return self.calculate_dynamic_score(
+            ml_proba=ml_proba,
+            purity_score=purity_score,
+            market_regime_score=market_regime_score,
+            win_rate_score=win_rate_score
+        )
+
+# Alias pour la compatibilité ascendante
+ConfidenceScoreCalculator = DynamicScoreCalculator
