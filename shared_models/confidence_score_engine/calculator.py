@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Union
 from decimal import Decimal, getcontext
 
@@ -35,12 +36,23 @@ class DynamicScoreCalculator:
         Returns:
             float: Le score final, normalisé sur une échelle de 0 à 10 et arrondi à une décimale, prêt pour le filtrage décisionnel.
         """
-        # Pondération recommandée pour Démarrage Phase II
-        # Ces poids sont ajustés pour donner la priorité à l'IA tout en gardant des garde-fous techniques et fondamentaux.
-        w_ml = Decimal('0.40')
-        w_purity = Decimal('0.20')
-        w_regime = Decimal('0.25')
-        w_history = Decimal('0.15')
+        # Vérification du mode Premium
+        premium_data_active = os.getenv("PREMIUM_DATA_ACTIVE", "True").lower() == "true"
+
+        if premium_data_active:
+            # Pondération standard (Phase II) : Priorité à l'IA et aux données complexes
+            w_ml = Decimal('0.40')
+            w_purity = Decimal('0.20')
+            w_regime = Decimal('0.25')
+            w_history = Decimal('0.15')
+        else:
+            # Mode "Dégradé" / Non-Premium :
+            # On coupe le poids du ML (qui dépend des features Premium manquantes)
+            # On redistribue sur l'Analyse Technique pure (Purity) et l'Historique
+            w_ml = Decimal('0.00')
+            w_purity = Decimal('0.80')  # Forte emphase sur la qualité géométrique
+            w_regime = Decimal('0.00')  # On ignore le régime s'il dépend de données externes complexes
+            w_history = Decimal('0.20') # On garde un peu d'historique
 
         ml_proba_d = Decimal(str(ml_proba))
         purity_score_d = Decimal(str(purity_score))
