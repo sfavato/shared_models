@@ -28,17 +28,29 @@ def generate_confidence_scores(
     features = {}
     
     # Sécurisation
-    required_cols = ['close', 'CVD', 'open_interest', 'funding_rate']
+    premium_data_active = os.getenv("PREMIUM_DATA_ACTIVE", "True").lower() == "true"
+
+    if premium_data_active:
+        required_cols = ['close', 'CVD', 'open_interest', 'funding_rate']
+    else:
+        required_cols = ['close']
+
     for col in required_cols:
         if col not in merged_df.columns:
             logger.error(f"Missing base column: {col}")
             return np.array([])
 
     price = merged_df['close']
-    cvd = merged_df['CVD']
+
+    # Gestion souple des colonnes Premium
+    cvd = merged_df.get('CVD')
+    if cvd is None:
+        cvd = pd.Series(0, index=merged_df.index)
+
     volume = merged_df.get('volume')
-    open_interest = merged_df['open_interest']
-    funding_rate = merged_df['funding_rate']
+
+    open_interest = merged_df.get('open_interest')
+    funding_rate = merged_df.get('funding_rate')
     
     long_liquidations = merged_df.get('long_liquidations_usd')
     short_liquidations = merged_df.get('short_liquidations_usd')
@@ -48,7 +60,11 @@ def generate_confidence_scores(
 
     # Calcul des features INTERNES
     features['divergence_score'] = calculate_divergence_score(price, cvd, lookback_period, volume=volume)
-    features['oi_weighted_funding_momentum'] = oi_weighted_funding_momentum(funding_rate, open_interest, lookback_period)
+
+    if open_interest is not None and funding_rate is not None:
+        features['oi_weighted_funding_momentum'] = oi_weighted_funding_momentum(funding_rate, open_interest, lookback_period)
+    else:
+        features['oi_weighted_funding_momentum'] = pd.Series(0, index=merged_df.index)
 
     if long_liquidations is not None and short_liquidations is not None:
         features['trapped_trader_score'] = trapped_trader_score(price, long_liquidations, short_liquidations, lookback_period)
