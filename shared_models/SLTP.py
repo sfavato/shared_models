@@ -103,7 +103,8 @@ class SLTP:
         Args:
             data (List[Dict[str, Any]]): Liste de dictionnaires de tickers.
         """
-        symbole = self.nom + "USDT"
+        from . import BASE_CURRENCY
+        symbole = self.nom + BASE_CURRENCY
         for item in data:
             if item['symbol'] == symbole:
                 self.prix_courant = float(item['lastPrice'])

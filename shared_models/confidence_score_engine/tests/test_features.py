@@ -136,33 +136,33 @@ def test_high_win_rate_performance(mock_db_connection):
     """Test win rate > 70% gives a +1.5 bonus."""
     mock_conn, mock_cursor = mock_db_connection
     mock_cursor.fetchall.return_value = [(0.75,), (0.8,)] # Average > 0.7
-    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDT', 'timeframe': '1h'}
+    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDC', 'timeframe': '1h'}
     assert get_historical_performance_score(pattern, mock_conn) == 1.5
 
 def test_medium_win_rate_performance(mock_db_connection):
     """Test win rate between 50-70% gives a +0.5 bonus."""
     mock_conn, mock_cursor = mock_db_connection
     mock_cursor.fetchall.return_value = [(0.6,), (0.65,)] # Average between 0.5 and 0.7
-    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDT', 'timeframe': '1h'}
+    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDC', 'timeframe': '1h'}
     assert get_historical_performance_score(pattern, mock_conn) == 0.5
 
 def test_low_win_rate_performance(mock_db_connection):
     """Test win rate < 40% gives a -1.0 malus."""
     mock_conn, mock_cursor = mock_db_connection
     mock_cursor.fetchall.return_value = [(0.3,), (0.35,)] # Average < 0.4
-    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDT', 'timeframe': '1h'}
+    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDC', 'timeframe': '1h'}
     assert get_historical_performance_score(pattern, mock_conn) == -1.0
 
 def test_no_history_performance(mock_db_connection):
     """Test no historical data returns a neutral score of 0."""
     mock_conn, mock_cursor = mock_db_connection
     mock_cursor.fetchall.return_value = [] # No records
-    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDT', 'timeframe': '1h'}
+    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDC', 'timeframe': '1h'}
     assert get_historical_performance_score(pattern, mock_conn) == 0.0
 
 def test_db_error_performance(mock_db_connection):
     """Test a database error returns a neutral score of 0."""
     mock_conn, mock_cursor = mock_db_connection
     mock_cursor.execute.side_effect = Exception("DB Error")
-    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDT', 'timeframe': '1h'}
+    pattern = {'name': 'Gartley', 'symbol': 'BTCUSDC', 'timeframe': '1h'}
     assert get_historical_performance_score(pattern, mock_conn) == 0.0

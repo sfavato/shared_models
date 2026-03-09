@@ -8,7 +8,7 @@ class TestBinance(unittest.TestCase):
     def test_get_candlestick_data_success(self, mock_get):
         # Arrange
         binance = Binance()
-        symbol = "BTCUSDT"
+        symbol = "BTCUSDC"
         start_time = 1609459200000
         end_time = 1609545600000
         timeframe = '4h'
@@ -30,7 +30,7 @@ class TestBinance(unittest.TestCase):
     def test_get_candlestick_data_failure(self, mock_get):
         # Arrange
         binance = Binance()
-        symbol = "BTCUSDT"
+        symbol = "BTCUSDC"
         start_time = 1609459200000
         end_time = 1609545600000
         timeframe = '4h'

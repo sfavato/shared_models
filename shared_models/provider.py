@@ -122,13 +122,14 @@ class Bitget:
         Essentiel pour normaliser les ordres avant envoi (arrondis corrects) et éviter les rejets API.
 
         Args:
-            symbol (Optional[str]): Le symbole spécifique à chercher (ex: 'BTCUSDT'). Si None, retourne tout.
+            symbol (Optional[str]): Le symbole spécifique à chercher (ex: 'BTCUSDC'). Si None, retourne tout.
 
         Returns:
             Union[Dict[str, Any], List[Dict[str, Any]]]: Configuration du contrat ou liste de configs.
         """
+        from . import BASE_CURRENCY
         request_path = "/api/v2/mix/market/contracts"
-        url = f"{base_url}{request_path}"
+        url = f"{base_url}{request_path}?productType={BASE_CURRENCY}-FUTURES"
         timestamp = get_timestamp()
         body = ""  # Empty for GET requests
 
@@ -146,9 +147,9 @@ class Bitget:
         }
         # Make the GET request
         logging.log(logging.INFO,
-            f"Bitget Query for contract config: {{'productType':'usdt-futures','symbol':{symbol}}}")
+            f"Bitget Query for contract config: {{'productType':'{BASE_CURRENCY.lower()}-futures','symbol':{symbol}}}")
         response = requests.get(url, headers=headers, params={
-                                "productType": "usdt-futures", "symbol": symbol})
+                                "productType": f"{BASE_CURRENCY.lower()}-futures", "symbol": symbol})
         logging.log(logging.INFO, f"Bitget Response for contract config: {json.dumps(response.json(), indent=4)} ")
         # Handle response
         if response.status_code == 200:
@@ -163,7 +164,7 @@ class Bitget:
                             "symbol": contract.get("symbol"),
                             "priceDecimals": contract.get("pricePlace"),
                             "positionSizeDecimals": contract.get("volPlace"),
-                            "minTradeUSDT": contract.get("minTradeUSDT")
+                            "minTrade": contract.get("minTradeUSDT") # Hyperliquid/Bitget could still map to this field, or rename variable
                         }
                 return []
             else:
@@ -182,13 +183,13 @@ class Bitget:
         Place un trade complet avec TP et SL.
 
         Cette méthode wrapper simplifie la création d'ordres complexes en gérant
-        le calcul de taille (size) à partir du montant USDT et du levier.
+        le calcul de taille (size) à partir du montant de marge et du levier.
 
         Args:
             symbol (str): Pair de trading.
             price (float): Prix d'entrée (limit) ou courant (market).
             leverage (int): Levier à utiliser.
-            quantityUSDT (float): Montant de la marge en USDT.
+            quantityUSDT (float): Montant de la marge dans la devise de base (nom conservé pour compatibilité descendante).
             side (str): 'open_long' ou 'open_short'.
             tp (float): Prix du Take Profit.
             sl (float): Prix du Stop Loss.
@@ -199,16 +200,20 @@ class Bitget:
         Returns:
             Dict[str, Any]: Résultat de l'ordre.
         """
+        quantity_margin = quantityUSDT
+        from . import BASE_CURRENCY
+        product_type = f"{BASE_CURRENCY}-FUTURES"
+
         if marketPrice:
 
             order_params = {
                 "symbol": symbol,        # Trading pair
-                "marginCoin": "USDT",       # Margin coin
-                "productType": "USDT-FUTURES",
+                "marginCoin": BASE_CURRENCY,       # Margin coin
+                "productType": product_type,
                 "marginMode": "isolated",
                 # "price": round(price,int(priceDecimals)),                  # Limit price
                 # Order size (quantity)
-                "size": (quantityUSDT/price)*leverage,
+                "size": (quantity_margin/price)*leverage,
                 "side": side,            # 'open_long', 'open_short', 'close_long', 'close_short'
                 "tradeSide": "open",
 
@@ -223,13 +228,13 @@ class Bitget:
         else:
             order_params = {
                 "symbol": symbol,        # Trading pair
-                "marginCoin": "USDT",       # Margin coin
-                "productType": "USDT-FUTURES",
+                "marginCoin": BASE_CURRENCY,       # Margin coin
+                "productType": product_type,
                 "marginMode": "isolated",
                 # Limit price
                 "price": round(price, int(priceDecimals)),
                 # Order size (quantity)
-                "size": (quantityUSDT/price)*leverage,
+                "size": (quantity_margin/price)*leverage,
                 "side": side,            # 'open_long', 'open_short', 'close_long', 'close_short'
                 "tradeSide": "open",
 
@@ -241,7 +246,7 @@ class Bitget:
                 "presetStopLossPrice": round(sl, int(priceDecimals)),
                 "force": "gtc"               # Order execution type
             }
-        logging.log(logging.INFO, f"Bitget in-trade placing order: {symbol} {side} x{leverage} current: {price}, tp: {tp} sl: {sl} qty:{round(int(quantityUSDT)/price)*leverage}")
+        logging.log(logging.INFO, f"Bitget in-trade placing order: {symbol} {side} x{leverage} current: {price}, tp: {tp} sl: {sl} qty:{round(int(quantity_margin)/price)*leverage}")
         result = self.placeorder(self.api_key, self.secret_key, self.passphrase, self.request_path, self.url, order_params)
         logging.log(logging.INFO, f"Bitget in-trade result: {json.dumps(result, indent=4)}")
         return result
@@ -293,7 +298,7 @@ class Binance:
         Récupère la précision requise pour le prix et la quantité d'un actif sur Binance.
 
         Args:
-            symbol (str): Symbole (ex: 'MINAUSDT').
+            symbol (str): Symbole (ex: 'MINAUSDC').
 
         Returns:
             Dict[str, int]: Dictionnaire {'price_precision': int, 'quantity_precision': int}.
@@ -471,13 +476,14 @@ class Binance:
 
 
 if __name__ == "__main__":
+    from . import BASE_CURRENCY
     myBinance = Binance()
-    print(myBinance.get_highest_3min("BTCUSDT"))
-    print(myBinance.get_highest_15min("BTCUSDT"))
+    print(myBinance.get_highest_3min(f"BTC{BASE_CURRENCY}"))
+    print(myBinance.get_highest_15min(f"BTC{BASE_CURRENCY}"))
     print(myBinance.calculate_current_timestamps())
     print(myBinance.calculate_previous_4h_timestamps())
     print(myBinance.calculate_3d_timestamps())
     print(myBinance.calculate_previous_two_4h_candlesticks())
-    print(myBinance.get_symbol_precision("BTCUSDT"))
-    print(myBinance.obtenir_tous_les_prix(["BTCUSDT", "ETHUSDT", "BNBUSDT"]))
+    print(myBinance.get_symbol_precision(f"BTC{BASE_CURRENCY}"))
+    print(myBinance.obtenir_tous_les_prix([f"BTC{BASE_CURRENCY}", f"ETH{BASE_CURRENCY}", f"BNB{BASE_CURRENCY}"]))
     print(myBinance.get_candlestick_data("BTC", 1609459200000, 1609545600000, '4h'))
