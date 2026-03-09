@@ -146,7 +146,8 @@ class Trade:
         Args:
             data (List[Dict[str, Any]]): Une liste de dictionnaires contenant les dernières données de marché (symbol, lastPrice, etc.).
         """
-        symbol = self.nom + 'USDT'
+        from . import BASE_CURRENCY
+        symbol = self.nom + BASE_CURRENCY
         
 
         for item in data:
